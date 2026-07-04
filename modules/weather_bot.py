@@ -640,6 +640,21 @@ class WeatherBot:
             await self._reply(sender, channel, f"US WeatherBot v1.1.0 (Python port)")
             return
             
+        # Help / Menu commands
+        if lower_text in ("help", "menu"):
+            menu_text = (
+                "WeatherBot Menu:\n"
+                "- Enter a 5-digit ZIP code (e.g. 76246) to get a 3-day forecast.\n"
+                "- Send 'subscribe [ZIP]' to receive daily morning forecasts.\n"
+                "- Send 'unsubscribe' or 'unsub' to cancel daily forecasts.\n"
+                "- Send 'help' or 'menu' to show this message."
+            )
+            chunks = split_string_to_byte_chunks(menu_text, 130)
+            for chunk in chunks:
+                await self._reply(sender, channel, chunk)
+                await asyncio.sleep(2)
+            return
+
         # 1. Handle Subscription Commands (DM only)
         if lower_text.startswith("subscribe"):
             if not is_dm:
@@ -670,7 +685,7 @@ class WeatherBot:
                 await self._reply(sender, channel, f"Error: Geocoding ZIP code {zipcode} failed.")
             return
 
-        if lower_text == "unsubscribe":
+        if lower_text in ("unsubscribe", "unsub"):
             if not is_dm:
                 await self._reply(sender, channel, "Error: Subscriptions must be managed via direct message.")
                 return
