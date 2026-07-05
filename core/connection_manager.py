@@ -670,7 +670,8 @@ class ConnectionManager:
                         lat_val = float(value)
                     except ValueError:
                         return {"error": "Latitude must be a valid float."}
-                    res = await self.mc.commands.set_coord_lat(lat_val)
+                    lon_val = self.bot.config.get("core", {}).get("longitude", 0.0)
+                    res = await self.mc.commands.set_coords(lat_val, lon_val)
                     if res.type == EventType.ERROR:
                         return {"error": f"Failed to set lat: {res}"}
                     if "core" not in self.bot.config:
@@ -683,7 +684,8 @@ class ConnectionManager:
                         lon_val = float(value)
                     except ValueError:
                         return {"error": "Longitude must be a valid float."}
-                    res = await self.mc.commands.set_coord_lon(lon_val)
+                    lat_val = self.bot.config.get("core", {}).get("latitude", 0.0)
+                    res = await self.mc.commands.set_coords(lat_val, lon_val)
                     if res.type == EventType.ERROR:
                         return {"error": f"Failed to set lon: {res}"}
                     if "core" not in self.bot.config:
@@ -699,10 +701,9 @@ class ConnectionManager:
                             lon_val = float(parts[1])
                         except ValueError:
                             return {"error": "Coords must be valid floats in format lat,lon"}
-                        lat_res = await self.mc.commands.set_coord_lat(lat_val)
-                        lon_res = await self.mc.commands.set_coord_lon(lon_val)
-                        if lat_res.type == EventType.ERROR or lon_res.type == EventType.ERROR:
-                            return {"error": f"Failed to set coords: lat={lat_res}, lon={lon_res}"}
+                        res = await self.mc.commands.set_coords(lat_val, lon_val)
+                        if res.type == EventType.ERROR:
+                            return {"error": f"Failed to set coords: {res}"}
                         if "core" not in self.bot.config:
                             self.bot.config["core"] = {}
                         self.bot.config["core"]["latitude"] = lat_val
@@ -1236,10 +1237,9 @@ class ConnectionManager:
         if lat is not None and lon is not None:
             logger.info(f"Setting persistent GPS coordinates from config on startup: lat={lat}, lon={lon}")
             try:
-                lat_res = await self.mc.commands.set_coord_lat(float(lat))
-                lon_res = await self.mc.commands.set_coord_lon(float(lon))
-                if lat_res.type == EventType.ERROR or lon_res.type == EventType.ERROR:
-                    logger.warning(f"Failed to set GPS coordinates on node: {lat_res} / {lon_res}")
+                res = await self.mc.commands.set_coords(float(lat), float(lon))
+                if res.type == EventType.ERROR:
+                    logger.warning(f"Failed to set GPS coordinates on node: {res}")
                 else:
                     logger.info("Successfully pushed GPS coordinates to device.")
             except Exception as e:
