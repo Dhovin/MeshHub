@@ -296,6 +296,10 @@ class TestConnectionManagerCommands(unittest.TestCase):
             self.cm.mc.commands.set_radio = AsyncMock(return_value=self.mock_event(EventType.OK, {"radio": True}))
             self.cm.mc.commands.set_path_hash_mode = AsyncMock(return_value=self.mock_event(EventType.OK, {"path_hash_mode": 2}))
             self.cm.mc.commands.set_autoadd_config = AsyncMock(return_value=self.mock_event(EventType.OK, {"autoadd_config": 1}))
+            self.cm.mc.commands.set_telemetry_mode_base = AsyncMock(return_value=self.mock_event(EventType.OK, {"telemetry_mode_base": 2}))
+            self.cm.mc.commands.set_telemetry_mode_loc = AsyncMock(return_value=self.mock_event(EventType.OK, {"telemetry_mode_loc": 1}))
+            self.cm.mc.commands.set_telemetry_mode_env = AsyncMock(return_value=self.mock_event(EventType.OK, {"telemetry_mode_env": 0}))
+            self.cm.mc.commands.set_advert_loc_policy = AsyncMock(return_value=self.mock_event(EventType.OK, {"advert_loc_policy": 1}))
             
             res = loop.run_until_complete(self.cm.execute("set name NewName"))
             self.assertEqual(res["name"], "NewName")
@@ -314,6 +318,22 @@ class TestConnectionManagerCommands(unittest.TestCase):
             
             res = loop.run_until_complete(self.cm.execute("set autoadd_config 1"))
             self.assertEqual(res, {"autoadd_config": 1})
+            
+            res = loop.run_until_complete(self.cm.execute("set telemetry_mode_base always"))
+            self.assertEqual(res, {"telemetry_mode_base": 2})
+            self.cm.mc.commands.set_telemetry_mode_base.assert_called_with(2)
+            
+            res = loop.run_until_complete(self.cm.execute("set telemetry_mode_loc dev"))
+            self.assertEqual(res, {"telemetry_mode_loc": 1})
+            self.cm.mc.commands.set_telemetry_mode_loc.assert_called_with(1)
+            
+            res = loop.run_until_complete(self.cm.execute("set telemetry_mode_env off"))
+            self.assertEqual(res, {"telemetry_mode_env": 0})
+            self.cm.mc.commands.set_telemetry_mode_env.assert_called_with(0)
+            
+            res = loop.run_until_complete(self.cm.execute("set advert_loc_policy share"))
+            self.assertEqual(res, {"advert_loc_policy": 1})
+            self.cm.mc.commands.set_advert_loc_policy.assert_called_with(1)
         finally:
             loop.close()
 

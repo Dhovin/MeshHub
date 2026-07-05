@@ -717,6 +717,70 @@ class ConnectionManager:
                     if res.type == EventType.ERROR:
                         return {"error": f"Failed to set autoadd_config: {res}"}
                     return res.payload
+                elif setting == "telemetry_mode_base":
+                    val_lower = value.lower()
+                    if val_lower in ("2", "all", "yes", "on", "always"):
+                        mode = 2
+                    elif val_lower in ("1", "selected", "dev", "device"):
+                        mode = 1
+                    else:
+                        mode = 0
+                    res = await self.mc.commands.set_telemetry_mode_base(mode)
+                    if res.type == EventType.ERROR:
+                        return {"error": f"Failed to set telemetry_mode_base: {res}"}
+                    if "core" not in self.bot.config:
+                        self.bot.config["core"] = {}
+                    self.bot.config["core"]["telemetry_mode_base"] = mode
+                    self.save_config()
+                    return res.payload
+                elif setting == "telemetry_mode_loc":
+                    val_lower = value.lower()
+                    if val_lower in ("2", "all", "yes", "on", "always") or val_lower.startswith("al"):
+                        mode = 2
+                    elif val_lower in ("1", "selected", "dev", "device") or val_lower.startswith("dev"):
+                        mode = 1
+                    else:
+                        mode = 0
+                    res = await self.mc.commands.set_telemetry_mode_loc(mode)
+                    if res.type == EventType.ERROR:
+                        return {"error": f"Failed to set telemetry_mode_loc: {res}"}
+                    if "core" not in self.bot.config:
+                        self.bot.config["core"] = {}
+                    self.bot.config["core"]["telemetry_mode_loc"] = mode
+                    self.save_config()
+                    return res.payload
+                elif setting == "telemetry_mode_env":
+                    val_lower = value.lower()
+                    if val_lower in ("2", "all", "yes", "on", "always") or val_lower.startswith("al"):
+                        mode = 2
+                    elif val_lower in ("1", "selected", "dev", "device") or val_lower.startswith("dev"):
+                        mode = 1
+                    else:
+                        mode = 0
+                    res = await self.mc.commands.set_telemetry_mode_env(mode)
+                    if res.type == EventType.ERROR:
+                        return {"error": f"Failed to set telemetry_mode_env: {res}"}
+                    if "core" not in self.bot.config:
+                        self.bot.config["core"] = {}
+                    self.bot.config["core"]["telemetry_mode_env"] = mode
+                    self.save_config()
+                    return res.payload
+                elif setting in ("advert_loc_policy", "adv_loc_policy"):
+                    val_lower = value.lower()
+                    if val_lower in ("1", "share", "on", "yes", "true"):
+                        policy = 1
+                        policy_str = "share"
+                    else:
+                        policy = 0
+                        policy_str = "none"
+                    res = await self.mc.commands.set_advert_loc_policy(policy)
+                    if res.type == EventType.ERROR:
+                        return {"error": f"Failed to set advert_loc_policy: {res}"}
+                    if "core" not in self.bot.config:
+                        self.bot.config["core"] = {}
+                    self.bot.config["core"]["advert_loc_policy"] = policy_str
+                    self.save_config()
+                    return res.payload
                 else:
                     return {"error": f"Unsupported setting: {setting}"}
             elif cmd in ("node_discover", "nd"):
@@ -1244,6 +1308,33 @@ class ConnectionManager:
                     logger.info("Successfully pushed GPS coordinates to device.")
             except Exception as e:
                 logger.error(f"Error pushing GPS coordinates to device: {e}", exc_info=True)
+
+        adv_loc_policy = core_cfg.get("advert_loc_policy")
+        if adv_loc_policy is not None:
+            logger.info(f"Setting advert location policy from config on startup: {adv_loc_policy}")
+            try:
+                policy_int = 1 if adv_loc_policy == "share" or adv_loc_policy is True or str(adv_loc_policy).lower() in ("1", "yes", "on", "true") else 0
+                res = await self.mc.commands.set_advert_loc_policy(policy_int)
+                if res.type == EventType.ERROR:
+                    logger.warning(f"Failed to set advert location policy on node: {res}")
+            except Exception as e:
+                logger.error(f"Error pushing advert location policy to device: {e}", exc_info=True)
+
+        telemetry_mode_loc = core_cfg.get("telemetry_mode_loc")
+        if telemetry_mode_loc is not None:
+            logger.info(f"Setting location telemetry mode from config on startup: {telemetry_mode_loc}")
+            try:
+                if str(telemetry_mode_loc).lower() in ("2", "all", "yes", "on", "always") or str(telemetry_mode_loc).lower().startswith("al"):
+                    mode = 2
+                elif str(telemetry_mode_loc).lower() in ("1", "selected", "dev", "device") or str(telemetry_mode_loc).lower().startswith("dev"):
+                    mode = 1
+                else:
+                    mode = 0
+                res = await self.mc.commands.set_telemetry_mode_loc(mode)
+                if res.type == EventType.ERROR:
+                    logger.warning(f"Failed to set location telemetry mode on node: {res}")
+            except Exception as e:
+                logger.error(f"Error pushing location telemetry mode to device: {e}", exc_info=True)
 
         # Trigger telemetry sync immediately on boot
         await self.sync_telemetry()
