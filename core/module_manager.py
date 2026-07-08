@@ -237,6 +237,11 @@ class ModuleManager:
                 # Get and validate configuration block
                 module_config = self._get_and_validate_config(instance)
 
+                # Skip loading if disabled in configuration
+                if not module_config.get("enabled", False):
+                    logger.info(f"Skipping disabled module: {instance.name}")
+                    continue
+
                 # Inject API
                 api = ModuleAPI(instance.name, self.bot)
 

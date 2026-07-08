@@ -724,6 +724,60 @@ def run_modules():
         print("-" * 50)
         for name, status in sorted(modules):
             print(f"{name:<25} | {status:<10}")
+
+def set_module_enabled(module_name, enable: bool):
+    config_path = "config/config.json"
+    modules_dir = "modules"
+    
+    # 1. Check if module file exists
+    module_file = f"{module_name}.py"
+    if not os.path.exists(os.path.join(modules_dir, module_file)):
+        print(f"Error: Module '{module_name}' not found in modules/ directory.")
+        sys.exit(1)
+        
+    # 2. Load config
+    if not os.path.exists(config_path):
+        print(f"Error: Config file not found at {config_path}")
+        sys.exit(1)
+        
+    try:
+        with open(config_path, 'r') as f:
+            cfg = json.load(f)
+    except Exception as e:
+        print(f"Error reading configuration file: {e}")
+        sys.exit(1)
+        
+    modules_cfg = cfg.setdefault("modules", {})
+    mod_cfg = modules_cfg.setdefault(module_name, {})
+    
+    # Update enabled status
+    mod_cfg["enabled"] = enable
+    
+    # Let's save config
+    try:
+        # Validate schema first
+        from core.validator import validate as validate_schema
+        schema_path = "config/schema.json"
+        if os.path.exists(schema_path):
+            with open(schema_path, 'r') as f:
+                schema = json.load(f)
+            errors = validate_schema(schema, cfg)
+            if errors:
+                print("Error: Proposed configuration violates schema:")
+                for err in errors:
+                    print(f"  - {err}")
+                sys.exit(1)
+                
+        # Write back to config file
+        with open(config_path, 'w') as f:
+            json.dump(cfg, f, indent=2)
+            
+        action = "enabled" if enable else "disabled"
+        print(f"Successfully {action} module '{module_name}'.")
+    except Exception as e:
+        print(f"Error writing configuration file: {e}")
+        sys.exit(1)
+
 def smart_merge_config(upstream, local):
     """Recursively merge upstream configuration with local/user configuration.
     
@@ -1290,7 +1344,7 @@ def print_main_help():
     print("  config        - Interactive terminal configuration wizard")
     print("  status        - Print bot status and connection info")
     print("  logs          - Stream/view troubleshooting logs (calls journalctl on Linux)")
-    print("  modules       - List all available modules in modules/ and their status")
+    print("  modules       - List modules, or enable/disable them (e.g. meshbot modules weather_bot disable)")
     print("  update        - Pull latest changes from Git, update dependencies, and restart daemon")
     print("  cli           - Run a direct CLI command on the hardware (e.g., meshbot cli set name MyNode)")
 
@@ -1379,13 +1433,26 @@ def main():
         run_logs()
         sys.exit(0)
     elif cmd == "modules":
-        if len(args) > 1:
-            print("Error: Command 'modules' does not accept arguments.")
-            print("Usage: meshbot modules")
+        if len(args) > 3:
+            print("Error: Invalid arguments for modules command.")
+            print("Usage: meshbot modules [<module_name> <enable|disable>]")
             print()
             print_main_help()
             sys.exit(1)
-        run_modules()
+        if len(args) == 1:
+            run_modules()
+        elif len(args) == 3:
+            mod_name = args[1]
+            action = args[2].lower()
+            if action not in ("enable", "disable"):
+                print(f"Error: Invalid action '{action}'. Must be 'enable' or 'disable'.")
+                print("Usage: meshbot modules [<module_name> <enable|disable>]")
+                sys.exit(1)
+            set_module_enabled(mod_name, action == "enable")
+        else:
+            print("Error: Invalid arguments. Specify both module name and action (enable|disable).")
+            print("Usage: meshbot modules [<module_name> <enable|disable>]")
+            sys.exit(1)
         sys.exit(0)
     elif cmd == "update":
         if len(args) > 1:
