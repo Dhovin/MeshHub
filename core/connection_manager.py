@@ -1420,9 +1420,9 @@ class ConnectionManager:
             # 2. Only if packet/log resolution failed, try to guess the sender from a text prefix (e.g. "Name: message")
             if not sender or sender == "unknown":
                 import re
-                match = re.match(r'^([A-Za-z0-9_.-][^:]*):\s+(.*)$', text_val)
+                match = re.match(r'^([^:\[\]]+):\s+(.*)$', text_val)
                 if match:
-                    guessed = match.group(1)
+                    guessed = match.group(1).strip()
                     # Ignore common system prefixes to prevent false positive name guesses
                     ignored_prefixes = {
                         "warning", "note", "info", "error", "http", "https", "link", "attention",
