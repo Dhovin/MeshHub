@@ -1380,18 +1380,8 @@ class ConnectionManager:
             if channel_val is None:
                 channel_val = payload.get("chan_name") or payload.get("chan_nb") or 0
                 
-            # If the text is prefixed with a name (e.g. "Name: message"), extract it
+            # 1. Attempt to resolve sender name from channels log first using the raw text
             sender = payload.get("sender") or payload.get("from")
-            if not sender:
-                import re
-                match = re.match(r'^([A-Za-z0-9_.-]+):\s+(.*)$', text_val)
-                if match:
-                    sender = match.group(1)
-                    text_val = match.group(2)
-                else:
-                    sender = "unknown"
-
-            # Attempt to resolve sender name from channels log if sender is currently unknown
             if (not sender or sender == "unknown") and hasattr(self, 'mc') and self.mc:
                 logged = None
                 reader = getattr(self.mc, '_reader', None)
@@ -1404,14 +1394,14 @@ class ConnectionManager:
                             break
 
                 if logged:
-                    # 1. Try transport_code matching
+                    # Try transport_code matching
                     transport_code = logged.get("transport_code")
                     if transport_code:
                         contact = self.mc.get_contact_by_key_prefix(transport_code)
                         if contact:
                             sender = contact.get("adv_name") or contact.get("name") or f"Unknown-{contact.get('public_key', '')[:6]}"
                     
-                    # 2. Try path matching as fallback (first hop represents sender)
+                    # Try path matching as fallback (first hop represents sender)
                     if (not sender or sender == "unknown") and logged.get("path"):
                         path_hash_size = logged.get("path_hash_size", 4)
                         path_str = logged.get("path", "")
@@ -1423,9 +1413,45 @@ class ConnectionManager:
                             else:
                                 sender = f"Unknown-{sender_prefix[:6]}"
                     
-                    # 3. Fallback to Unknown-{transport_code[:6]} if transport_code is present but contact is unknown
+                    # Fallback to Unknown-{transport_code[:6]} if transport_code is present but contact is unknown
                     if (not sender or sender == "unknown") and transport_code:
                         sender = f"Unknown-{transport_code[:6]}"
+
+            # 2. Only if packet/log resolution failed, try to guess the sender from a text prefix (e.g. "Name: message")
+            if not sender or sender == "unknown":
+                import re
+                match = re.match(r'^([A-Za-z0-9_.-]+):\s+(.*)$', text_val)
+                if match:
+                    guessed = match.group(1)
+                    # Ignore common system prefixes to prevent false positive name guesses
+                    ignored_prefixes = {
+                        "warning", "note", "info", "error", "http", "https", "link", "attention",
+                        "msg", "message", "sender", "receiver", "broadcast", "all", "group",
+                        "chan", "channel", "alert", "notice", "time", "date"
+                    }
+                    if guessed.lower() not in ignored_prefixes:
+                        sender = guessed
+                        text_val = match.group(2)
+                    else:
+                        sender = "unknown"
+                else:
+                    sender = "unknown"
+            else:
+                # If we successfully resolved the sender name, clean its prefix from the message text
+                import re
+                # Try matching full sender name first
+                pattern1 = rf'^{re.escape(sender)}:\s+(.*)$'
+                match1 = re.match(pattern1, text_val, re.IGNORECASE)
+                if match1:
+                    text_val = match1.group(1)
+                else:
+                    # Try matching first word of sender name (to handle names with emojis/suffixes like "Dhovin 🛻")
+                    first_word = sender.split()[0] if sender.strip() else ""
+                    if first_word and len(first_word) >= 3:
+                        pattern2 = rf'^{re.escape(first_word)}:\s+(.*)$'
+                        match2 = re.match(pattern2, text_val, re.IGNORECASE)
+                        if match2:
+                            text_val = match2.group(1)
                     
             msg = {
                 "sender": sender,
