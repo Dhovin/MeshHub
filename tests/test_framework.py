@@ -556,7 +556,7 @@ class TestEventMessageParsing(unittest.TestCase):
             "sender_timestamp": 2000,
             "message": "test",
             "path_hash_size": 4,
-            "path": "11223344aabbccdd"
+            "path": "aabbccdd11223344"
         }]
         
         evt = MockEvent({
