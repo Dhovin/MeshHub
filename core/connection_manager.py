@@ -1401,18 +1401,6 @@ class ConnectionManager:
                         if contact:
                             sender = contact.get("adv_name") or contact.get("name") or f"Unknown-{contact.get('public_key', '')[:6]}"
                     
-                    # Try path matching as fallback (last hop represents sender in prepended paths)
-                    if (not sender or sender == "unknown") and logged.get("path"):
-                        path_hash_size = logged.get("path_hash_size", 4)
-                        path_str = logged.get("path", "")
-                        if len(path_str) >= path_hash_size * 2:
-                            sender_prefix = path_str[-path_hash_size * 2:]
-                            contact = self.mc.get_contact_by_key_prefix(sender_prefix)
-                            if contact:
-                                sender = contact.get("adv_name") or contact.get("name") or f"Unknown-{contact.get('public_key', '')[:6]}"
-                            else:
-                                sender = f"Unknown-{sender_prefix[:6]}"
-                    
                     # Fallback to Unknown-{transport_code[:6]} if transport_code is present but contact is unknown
                     if (not sender or sender == "unknown") and transport_code:
                         sender = f"Unknown-{transport_code[:6]}"

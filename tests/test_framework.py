@@ -550,17 +550,10 @@ class TestEventMessageParsing(unittest.TestCase):
         published_msg = bot.event_bus.publish.call_args[0][1]
         self.assertEqual(published_msg["sender"], "Dhovin")
         
-        # 2. Fallback to path in channels_log
+        # 2. Guess sender from text prefix
         bot.event_bus.publish.reset_mock()
-        parser.channels_log = [{
-            "sender_timestamp": 2000,
-            "message": "test",
-            "path_hash_size": 4,
-            "path": "aabbccdd11223344"
-        }]
-        
         evt = MockEvent({
-            "text": "test",
+            "text": "Alice: hello there",
             "channel_idx": 1,
             "sender_timestamp": 2000
         })
@@ -568,6 +561,7 @@ class TestEventMessageParsing(unittest.TestCase):
         cm._on_channel_message(evt)
         published_msg = bot.event_bus.publish.call_args[0][1]
         self.assertEqual(published_msg["sender"], "Alice")
+        self.assertEqual(published_msg["text"], "hello there")
         
         # 3. Fallback to Unknown-{prefix}
         bot.event_bus.publish.reset_mock()
