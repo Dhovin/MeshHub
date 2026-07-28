@@ -31,3 +31,14 @@ __pycache__/
 *.pyd
 .pytest_cache/
 tests/
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Local/Dynamic Configs & State files
+config/config.json.template
+config/net_state.json
+config/weather_subscriptions.json

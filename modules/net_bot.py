@@ -103,6 +103,14 @@ class NetBot:
             config["state_file"] = val
         elif "state_file" not in config:
             config["state_file"] = current_state_file
+
+        # 7. Timezone
+        current_tz = config.get("timezone", "America/Chicago")
+        val = input(f"Enter Timezone (e.g. America/Chicago, America/New_York, America/Los_Angeles) [current: {current_tz}]: ").strip()
+        if val:
+            config["timezone"] = val
+        elif "timezone" not in config:
+            config["timezone"] = current_tz
             
         return config
 

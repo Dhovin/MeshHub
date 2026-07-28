@@ -774,6 +774,7 @@ def set_module_enabled(module_name, enable: bool):
             
         action = "enabled" if enable else "disabled"
         print(f"Successfully {action} module '{module_name}'.")
+        print("Note: If MeshCore-bot is currently running, run 'meshbot restart' (or 'sudo systemctl restart meshcore-bot') to apply the changes.")
     except Exception as e:
         print(f"Error writing configuration file: {e}")
         sys.exit(1)
