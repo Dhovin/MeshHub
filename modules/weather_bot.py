@@ -333,6 +333,7 @@ class WeatherBot:
             "timeout": 180,
             "severityFilter": ["severe", "extreme"],
             "certaintyFilter": ["observed", "likely"],
+            "eventFilter": ["storm", "tornado", "hurricane", "blizzard", "squall", "cyclone", "typhoon"],
             "messageTemplate": "{event} Alert for {region}\nEffective: {start} to {end}\nSeverity: {severity}\n{headline}",
             "severity": {
                 "unknown": "Unknown", "minor": "Minor", "moderate": "Moderate",
@@ -387,6 +388,10 @@ class WeatherBot:
                             "items": {"type": "string"}
                         },
                         "certaintyFilter": {
+                            "type": "array",
+                            "items": {"type": "string"}
+                        },
+                        "eventFilter": {
                             "type": "array",
                             "items": {"type": "string"}
                         }
@@ -926,6 +931,7 @@ class WeatherBot:
             
             sev_filter = [s.lower() for s in self.config_meteo_alerts.get("severityFilter", [])]
             cert_filter = [c.lower() for c in self.config_meteo_alerts.get("certaintyFilter", [])]
+            event_filter = [e.lower() for e in self.config_meteo_alerts.get("eventFilter", [])]
             
             for feature in features:
                 props = feature.get("properties", {})
@@ -947,8 +953,12 @@ class WeatherBot:
                         
                 severity = (props.get("severity") or "unknown").lower()
                 certainty = (props.get("certainty") or "unknown").lower()
+                event_name = props.get("event") or ""
                 
                 if severity not in sev_filter or certainty not in cert_filter:
+                    continue
+                    
+                if event_filter and not any(kw in event_name.lower() for kw in event_filter):
                     continue
                     
                 if fid in self.meteo_alerts:

@@ -172,5 +172,136 @@ class TestWeatherBotMessages(unittest.TestCase):
         finally:
             loop.close()
 
+class TestWeatherBotAlerts(unittest.TestCase):
+    def setUp(self):
+        self.bot = WeatherBot()
+        self.api = MagicMock()
+        self.api.is_self = MagicMock(return_value=False)
+        self.api.matches_channel = AsyncMock(return_value=True)
+        self.api.request_channel = AsyncMock(return_value=2)
+        
+        self.conn_manager = MagicMock()
+        self.conn_manager.execute = AsyncMock(return_value={"ok": True})
+        self.api.bot.connection_manager = self.conn_manager
+        
+        self.bot.api = self.api
+        self.bot.channel_names = {"alerts": "weather", "weather": "weather"}
+        self.bot.my_position = {"lat": 33.0906, "lon": -97.2911}
+
+    @patch('modules.weather_bot.requests.get')
+    def test_meteo_alerts_filters_to_storms_only(self, mock_get):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Mock NWS response with a mix of storm and non-storm alerts
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "features": [
+                    {
+                        "id": "alert-1",
+                        "properties": {
+                            "identifier": "alert-1",
+                            "areaDesc": "Denton County",
+                            "event": "Severe Thunderstorm Warning",
+                            "onset": "2026-08-22T20:00:00-05:00",
+                            "expires": "2026-08-23T23:00:00-05:00",
+                            "severity": "Severe",
+                            "certainty": "Observed",
+                            "headline": "Severe Thunderstorm Warning for Denton County",
+                            "instruction": "Take shelter."
+                        }
+                    },
+                    {
+                        "id": "alert-2",
+                        "properties": {
+                            "identifier": "alert-2",
+                            "areaDesc": "Wise County",
+                            "event": "Tornado Warning",
+                            "onset": "2026-08-22T20:00:00-05:00",
+                            "expires": "2026-08-23T23:00:00-05:00",
+                            "severity": "Extreme",
+                            "certainty": "Observed",
+                            "headline": "Tornado Warning for Wise County",
+                            "instruction": "Take cover immediately."
+                        }
+                    },
+                    {
+                        "id": "alert-3",
+                        "properties": {
+                            "identifier": "alert-3",
+                            "areaDesc": "Cooke County",
+                            "event": "Flash Flood Warning",
+                            "onset": "2026-08-22T20:00:00-05:00",
+                            "expires": "2026-08-23T23:00:00-05:00",
+                            "severity": "Severe",
+                            "certainty": "Observed",
+                            "headline": "Flash Flood Warning for Cooke County",
+                            "instruction": "Turn around don't drown."
+                        }
+                    },
+                    {
+                        "id": "alert-4",
+                        "properties": {
+                            "identifier": "alert-4",
+                            "areaDesc": "Dallas County",
+                            "event": "Excessive Heat Warning",
+                            "onset": "2026-08-22T20:00:00-05:00",
+                            "expires": "2026-08-23T23:00:00-05:00",
+                            "severity": "Extreme",
+                            "certainty": "Observed",
+                            "headline": "Excessive Heat Warning",
+                            "instruction": "Stay hydrated."
+                        }
+                    }
+                ]
+            }
+            mock_get.return_value = mock_response
+            
+            with patch('asyncio.sleep', AsyncMock()):
+                loop.run_until_complete(self.bot.check_meteo_alerts())
+                
+            # Only alert-1 (Severe Thunderstorm) and alert-2 (Tornado) should be broadcasted
+            self.assertIn("alert-1", self.bot.meteo_alerts)
+            self.assertIn("alert-2", self.bot.meteo_alerts)
+            self.assertNotIn("alert-3", self.bot.meteo_alerts)
+            self.assertNotIn("alert-4", self.bot.meteo_alerts)
+            
+            # Verify sent messages on channel 2
+            sent_texts = [call[0][0][2] for call in self.conn_manager.execute.call_args_list if call[0][0][0] == "chan"]
+            self.assertEqual(len(sent_texts), 2)
+            self.assertTrue(any("Severe Thunderstorm Warning" in msg for msg in sent_texts))
+            self.assertTrue(any("Tornado Warning" in msg for msg in sent_texts))
+            self.assertFalse(any("Flash Flood" in msg for msg in sent_texts))
+            self.assertFalse(any("Excessive Heat" in msg for msg in sent_texts))
+        finally:
+            loop.close()
+
+    def test_blitz_warning_lightning_alert(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Add at least 10 blitz strikes to trigger warning threshold
+            for _ in range(10):
+                self.bot.blitz_buffer.append({
+                    "key": "N|2",
+                    "heading": "N",
+                    "distance": 20.0,
+                    "lat": 33.27,
+                    "lon": -97.29
+                })
+                
+            with patch.object(self.bot, 'geocode_cached', AsyncMock(return_value="Denton, TX")), \
+                 patch('asyncio.sleep', AsyncMock()):
+                loop.run_until_complete(self.bot.blitz_warning())
+                
+            self.assertTrue(self.conn_manager.execute.called)
+            args = self.conn_manager.execute.call_args[0][0]
+            self.assertEqual(args[0], "chan")
+            self.assertEqual(args[1], "2")
+            self.assertIn("🌩️ Lightning: Denton, TX (20km North)", args[2])
+        finally:
+            loop.close()
+
 if __name__ == '__main__':
     unittest.main()

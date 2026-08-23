@@ -57,6 +57,15 @@
           "observed",
           "likely"
         ],
+        "eventFilter": [
+          "storm",
+          "tornado",
+          "hurricane",
+          "blizzard",
+          "squall",
+          "cyclone",
+          "typhoon"
+        ],
         "messageTemplate": "{event} Alert for {region}\nEffective: {start} to {end}\nSeverity: {severity}\n{headline}"
       }
     },
