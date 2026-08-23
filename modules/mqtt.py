@@ -1112,7 +1112,7 @@ class Mqtt:
         
         payload = AuthTokenPayload(
             public_key=self.device_public_key,
-            exp=int(time.time()) + 86400, # 24 Hours
+            exp=b_cfg.get("token_exp", None), # None by default (tokens do not expire)
             **claims
         )
         
@@ -1301,8 +1301,12 @@ class Mqtt:
                 continue
                 
             token_info = self.jwt_tokens.get(idx)
+            # If token does not have an expiration, no renewal needed
+            if not token_info or token_info.get("expires_at") is None:
+                continue
+
             # Renew if missing, expired, or expiring in < 10 mins (600 seconds)
-            if not token_info or (token_info["expires_at"] - current_time) < 600:
+            if (token_info["expires_at"] - current_time) < 600:
                 logger.info(f"[{self.name}] JWT token for broker {idx} nearing expiry. Renewing...")
                 
                 # Generate new token
@@ -1315,5 +1319,14 @@ class Mqtt:
                     username = f"v1_{self.device_public_key.upper()}"
                     client.username_pw_set(username, new_token)
                     
-                    # Disconnect to trigger auto-reconnection with new token
-                    client.disconnect()
+                    # Reconnect client with updated credentials
+                    try:
+                        client.reconnect()
+                    except Exception as e:
+                        logger.warning(f"[{self.name}] Broker {idx} reconnect failed ({e}), restarting loop...")
+                        try:
+                            client.loop_stop()
+                            client.connect(b_cfg.get("server"), b_cfg.get("port", 1883), keepalive=60)
+                            client.loop_start()
+                        except Exception as loop_err:
+                            logger.error(f"[{self.name}] Failed to restart loop for broker {idx}: {loop_err}")
