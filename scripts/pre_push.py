@@ -8,7 +8,7 @@ def main():
     os.chdir(project_root)
     
     print("==================================================")
-    print("         MeshCore-bot Pre-push Validator          ")
+    print("            MeshHub Pre-push Validator            ")
     print("==================================================")
     
     # 1. Validate configuration file

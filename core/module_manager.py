@@ -5,6 +5,8 @@ import asyncio
 import importlib.util
 import contextvars
 from core.validator import validate as validate_schema
+from core.template_engine import extract_template_fields, format_template
+from core.rate_limiter import PerUserRateLimiter, ChannelRateLimiter
 
 logger = logging.getLogger("ModuleManager")
 
@@ -184,11 +186,53 @@ class ModuleAPI:
             return clean_channel == clean_target
         return False
 
+    def format_template(self, template: str, message_data: dict = None, extra_fields: dict = None) -> str:
+        """Format a response string substituting placeholders like {sender}, {snr}, {rssi}, {path}, {hops}."""
+        state = self.bot.state_cache.get_state() if self.bot.state_cache else {}
+        tz = getattr(self.bot, "timezone", "UTC")
+        fields = extract_template_fields(message_data or {}, tz, state)
+        if extra_fields:
+            fields.update(extra_fields)
+        return format_template(template, fields)
+
+    def can_send_user(self, user_key: str) -> bool:
+        """Check if sending to user is permitted under per-user rate limiting."""
+        return self.bot.module_manager.user_limiter.can_send(user_key)
+
+    def record_user_send(self, user_key: str):
+        """Record transmission to user to update per-user cooldown."""
+        self.bot.module_manager.user_limiter.record_send(user_key)
+
+    def time_until_user_send(self, user_key: str) -> float:
+        """Remaining cooldown seconds before next message to this user is permitted."""
+        return self.bot.module_manager.user_limiter.time_until_next(user_key)
+
+    def can_send_channel(self, channel) -> bool:
+        """Check if sending to channel is permitted under channel rate limiting."""
+        return self.bot.module_manager.channel_limiter.can_send(channel)
+
+    def record_channel_send(self, channel):
+        """Record transmission to channel to update channel cooldown."""
+        self.bot.module_manager.channel_limiter.record_send(channel)
+
+    def time_until_channel_send(self, channel) -> float:
+        """Remaining cooldown seconds before next message to this channel is permitted."""
+        return self.bot.module_manager.channel_limiter.time_until_next(channel)
+
 class ModuleManager:
     def __init__(self, bot):
         self.bot = bot
         self.modules = {}
         self.module_channels = {}
+        
+        # Initialize central rate limiters
+        cfg = getattr(bot, "config", {}) or {}
+        rl_cfg = cfg.get("core", {}).get("rateLimiting", {})
+        user_sec = rl_cfg.get("perUserRateLimitSeconds", 30.0)
+        chan_limits = rl_cfg.get("channelLimits", {})
+        
+        self.user_limiter = PerUserRateLimiter(user_sec)
+        self.channel_limiter = ChannelRateLimiter(chan_limits)
 
     async def load_modules(self, modules_dir):
         """

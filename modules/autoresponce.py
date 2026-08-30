@@ -18,7 +18,8 @@ class Autoresponce:
                 "channels": {
                     "type": "array",
                     "items": {"type": "string"}
-                }
+                },
+                "responseTemplate": {"type": "string"}
             },
             "required": ["enabled"]
         }
@@ -57,11 +58,12 @@ class Autoresponce:
         self.api = api
         self.config = config
         self.channels = config.get("channels", ["#test", "#testing"])
+        self.response_template = config.get("responseTemplate", "@[{sender}] ACK | {connection_info}")
         
         # Declare only the exact channels to the bot API
         self.api.declare_channels(self.channels)
         
-        logger.info(f"[{self.name}] Initialized with channels: {self.channels}")
+        logger.info(f"[{self.name}] Initialized with channels: {self.channels}, template: {self.response_template}")
 
     async def start(self):
         """
@@ -112,9 +114,13 @@ class Autoresponce:
         if "test" not in text.lower():
             return
 
-        asyncio.create_task(self._handle_message_async(sender, text, channel))
+        asyncio.create_task(self._handle_message_async(data))
 
-    async def _handle_message_async(self, sender, text, channel):
+    async def _handle_message_async(self, data):
+        sender = data.get("sender", "unknown")
+        text = data.get("text", "")
+        channel = data.get("channel")
+
         # Verify if incoming channel index matches any of our monitored indices
         is_target_channel = False
         target_idx = None
@@ -124,14 +130,30 @@ class Autoresponce:
                 target_idx = self.channel_indices.get(ch)
                 break
 
-        if not is_target_channel:
+        if not is_target_channel or target_idx is None:
+            return
+
+        # Airtime & per-user rate limit checks
+        if not self.api.can_send_user(sender):
+            logger.info(f"[{self.name}] Rate-limited: Cooldown active for sender '{sender}'. Skipping auto-reply.")
+            return
+
+        if not self.api.can_send_channel(target_idx):
+            logger.info(f"[{self.name}] Rate-limited: Cooldown active for channel '{target_idx}'. Skipping auto-reply.")
             return
 
         logger.info(f"[{self.name}] Match found! Sender: {sender}, Msg: {text}, Channel Index: {target_idx}")
-        await self._send_reply(sender, target_idx)
+        
+        # Render response template
+        reply = self.api.format_template(self.response_template, data)
+        
+        # Record send for rate limiting
+        self.api.record_user_send(sender)
+        self.api.record_channel_send(target_idx)
 
-    async def _send_reply(self, recipient, channel_idx):
-        reply = f"@[{recipient}] ACK"
-        logger.info(f"[{self.name}] Replying on channel {channel_idx}: {reply}")
-        res = await self.api.bot.connection_manager.execute(["chan", str(channel_idx), reply])
+        await self._send_reply(reply, target_idx)
+
+    async def _send_reply(self, reply_text, channel_idx):
+        logger.info(f"[{self.name}] Replying on channel {channel_idx}: {reply_text}")
+        res = await self.api.bot.connection_manager.execute(["chan", str(channel_idx), reply_text])
         logger.info(f"[{self.name}] Reply response: {res}")

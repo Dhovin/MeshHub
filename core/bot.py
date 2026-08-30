@@ -11,7 +11,7 @@ from core.scheduler import Scheduler
 from core.connection_manager import ConnectionManager
 from core.module_manager import ModuleManager
 
-logger = logging.getLogger("MeshBot")
+logger = logging.getLogger("MeshHub")
 
 class SafeStreamWrapper:
     def __init__(self, stream):
@@ -33,7 +33,7 @@ class SafeStreamWrapper:
         if hasattr(self.stream, 'flush'):
             self.stream.flush()
 
-class MeshBot:
+class MeshHub:
     def __init__(self, config_path="config/config.json", schema_path="config/schema.json", modules_dir="modules"):
         self.config_path = config_path
         self.schema_path = schema_path
@@ -196,7 +196,7 @@ class MeshBot:
                 self.timezone = "UTC"
 
     async def main(self):
-        logger.info("Starting MeshCore-bot Central Hub...")
+        logger.info("Starting MeshHub Central Hub...")
         
         # Resolve timezone
         await self.resolve_timezone()
@@ -318,3 +318,6 @@ class MeshBot:
                 await writer.wait_closed()
             except Exception:
                 pass
+
+# Backward-compatibility alias
+MeshBot = MeshHub

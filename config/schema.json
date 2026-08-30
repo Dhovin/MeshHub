@@ -60,6 +60,22 @@
           "type": "number",
           "minimum": -180.0,
           "maximum": 180.0
+        },
+        "rateLimiting": {
+          "type": "object",
+          "properties": {
+            "txRateLimitSeconds": {
+              "type": "number",
+              "minimum": 0.0
+            },
+            "perUserRateLimitSeconds": {
+              "type": "number",
+              "minimum": 0.0
+            },
+            "channelLimits": {
+              "type": "object"
+            }
+          }
         }
       },
       "required": ["timeSyncInterval", "shutdownTimeoutMs"]

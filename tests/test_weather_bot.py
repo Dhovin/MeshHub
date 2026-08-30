@@ -1,7 +1,7 @@
 import unittest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime
+from datetime import datetime, timedelta
 from modules.weather_bot import (
     get_emoji_for_forecast,
     format_compressed_forecast,
@@ -194,6 +194,7 @@ class TestWeatherBotAlerts(unittest.TestCase):
         asyncio.set_event_loop(loop)
         try:
             # Mock NWS response with a mix of storm and non-storm alerts
+            future_expiry = (datetime.now().astimezone() + timedelta(hours=2)).isoformat()
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_response.json.return_value = {
@@ -205,7 +206,7 @@ class TestWeatherBotAlerts(unittest.TestCase):
                             "areaDesc": "Denton County",
                             "event": "Severe Thunderstorm Warning",
                             "onset": "2026-08-22T20:00:00-05:00",
-                            "expires": "2026-08-23T23:00:00-05:00",
+                            "expires": future_expiry,
                             "severity": "Severe",
                             "certainty": "Observed",
                             "headline": "Severe Thunderstorm Warning for Denton County",
@@ -219,7 +220,7 @@ class TestWeatherBotAlerts(unittest.TestCase):
                             "areaDesc": "Wise County",
                             "event": "Tornado Warning",
                             "onset": "2026-08-22T20:00:00-05:00",
-                            "expires": "2026-08-23T23:00:00-05:00",
+                            "expires": future_expiry,
                             "severity": "Extreme",
                             "certainty": "Observed",
                             "headline": "Tornado Warning for Wise County",
@@ -233,7 +234,7 @@ class TestWeatherBotAlerts(unittest.TestCase):
                             "areaDesc": "Cooke County",
                             "event": "Flash Flood Warning",
                             "onset": "2026-08-22T20:00:00-05:00",
-                            "expires": "2026-08-23T23:00:00-05:00",
+                            "expires": future_expiry,
                             "severity": "Severe",
                             "certainty": "Observed",
                             "headline": "Flash Flood Warning for Cooke County",
@@ -247,7 +248,7 @@ class TestWeatherBotAlerts(unittest.TestCase):
                             "areaDesc": "Dallas County",
                             "event": "Excessive Heat Warning",
                             "onset": "2026-08-22T20:00:00-05:00",
-                            "expires": "2026-08-23T23:00:00-05:00",
+                            "expires": future_expiry,
                             "severity": "Extreme",
                             "certainty": "Observed",
                             "headline": "Excessive Heat Warning",

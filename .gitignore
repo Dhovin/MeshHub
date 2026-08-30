@@ -30,7 +30,6 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
-tests/
 
 # Python Virtual Environments
 venv/

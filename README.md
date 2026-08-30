@@ -1,6 +1,6 @@
-# MeshCore-bot Central Hub Framework
+# MeshHub Central Hub Framework
 
-MeshCore-bot is a modular, secure, and cross-platform Python-based central hub for companion radio nodes running the Meshcore protocol. Rather than wrapping CLI subprocesses, MeshCore-bot connects natively to the official Python `meshcore` library. It translates incoming message telemetry and node diagnostics into structured JSON, which it broadcasts over an internal event bus, alongside providing a custom task scheduler, centralized read-only state cache, and dynamic plugin system.
+MeshHub is a modular, secure, and cross-platform Python-based central hub for companion radio nodes running the Meshcore protocol. Rather than wrapping CLI subprocesses, MeshHub connects natively to the official Python `meshcore` library. It translates incoming message telemetry and node diagnostics into structured JSON, which it broadcasts over an internal event bus, alongside providing a custom task scheduler, centralized read-only state cache, dynamic plugin system, and browser-based Web Viewer dashboard.
 
 ---
 
@@ -15,15 +15,19 @@ MeshCore-bot is a modular, secure, and cross-platform Python-based central hub f
 7. **Graceful Shutdown**: Intercepts `SIGINT`/`SIGTERM` to safely close connections and halt plugins (enforcing a strict 10-second stop timeout limit).
 8. **Command Validation**: Sanitizes command strings to block multi-line shell injections.
 9. **Persistent GPS Coordinates & Telemetry**: Saves `latitude`, `longitude`, `advert_loc_policy`, and `telemetry_mode_loc` in the configuration, automatically pushing them to the hardware node upon connection to ensure advertisements always broadcast the correct location.
+10. **LoRa Airtime Rate Limiting & Safety**: Built-in TX delay throttling, per-user cooldowns, and channel-level rate limiters to comply with duty cycles and prevent RF congestion.
+11. **Dynamic Response Templating**: Rich placeholder substitution (`{sender}`, `{connection_info}`, `{snr}`, `{rssi}`, `{timestamp}`, `{elapsed}`, `{path}`, `{hops}`) with newline escape handling.
+12. **Web Viewer & Topology Graph**: Integrated lightweight, zero-external-dependency async browser dashboard featuring real-time node diagnostics, heard contacts table, live packet activity stream, radio controls, and an interactive physics-based force-directed topology graph.
 
 ---
 
 ## Directory Structure
 
 ```
-MeshCore-Bot/
+MeshHub/
 ├── bin/
-│   └── meshbot             # Shebang-executable Python CLI & setup wizard
+│   ├── meshhub             # Primary Shebang-executable CLI & setup wizard
+│   └── meshbot             # Backward-compatible CLI alias
 ├── config/
 │   ├── config.json         # Centralized configuration settings
 │   ├── schema.json         # JSON Schema for config.json validation
@@ -33,19 +37,27 @@ MeshCore-Bot/
 │   ├── connection_manager.py # Native meshcore library connector & auto-discovery
 │   ├── event_bus.py        # Asynchronous sync/async event broker
 │   ├── module_manager.py   # Dynamic importlib module loader & sandbox
+│   ├── rate_limiter.py     # Airtime TX, per-user, and channel rate limiters
 │   ├── scheduler.py        # Custom asyncio-based cron scheduler
 │   ├── state_cache.py      # Telemetry state store with deep copies
+│   ├── template_engine.py  # Response templating & placeholder engine
 │   └── validator.py        # Zero-dependency JSON Schema validator
 ├── modules/
-│   └── template.py         # Blueprint template for custom modules
+│   ├── autoresponce.py     # Channel auto-reply with templating & rate limiting
+│   ├── mqtt.py             # Multi-broker packet capture with Ed25519 tokens
+│   ├── net_bot.py          # Automated Ham/Mesh radio check-in net controller
+│   ├── template.py         # Blueprint template for custom modules
+│   ├── weather_bot.py      # NWS and Open-Meteo weather forecasts & alerts
+│   └── web_viewer.py       # Web Viewer dashboard & interactive topology graph
 ├── scripts/
 │   ├── pre_push.py         # Runs pre-push validation (tests & schema check)
 │   └── validate_config.py  # Configuration schema validator script
 ├── tests/
-│   └── test_framework.py   # Unittest framework test suite
+│   └── test_*.py           # Unittest test suites
 ├── install.sh              # Linux installation and systemd setup script
 ├── uninstall.sh            # Linux service removal script
 ├── setup-dev.sh            # Developer git repository configuration script
+├── LICENSE                 # MIT License with community attribution
 └── README.md
 ```
 
@@ -176,3 +188,33 @@ The framework injects a `ModuleAPI` instance into the `init` hook:
 - **`api.schedule_task(cron_expression, callback)`**:
   Schedules a task on a cron schedule. Returns a cancel function.
   - Example: `api.schedule_task('*/5 * * * *', self.my_periodic_task)`
+- **`api.format_template(template_string, message_data, extra_fields=None)`**:
+  Renders a string template substituting `{sender}`, `{connection_info}`, `{snr}`, `{rssi}`, `{timestamp}`, `{elapsed}`, `{path}`, `{hops}`, etc.
+  - Example: `api.format_template('Ack to {sender} | {connection_info}', data)`
+- **`api.can_send_user(user_key)` / `api.record_user_send(user_key)`**:
+  Checks and records per-user cooldowns to prevent user-targeted spam.
+- **`api.can_send_channel(channel)` / `api.record_channel_send(channel)`**:
+  Checks and records per-channel spacing cooldowns.
+
+---
+
+## Web Viewer & Dashboard
+
+MeshHub includes a built-in, lightweight web dashboard.
+- **Port**: Default `8080` (configurable in `config/config.json`).
+- **Access**: Open `http://<device-ip>:8080` in your web browser.
+- **Features**:
+  - **Live Contacts**: Real-time table of heard nodes with roles (Repeater/Companion), SNR, RSSI, and hops.
+  - **Interactive Topology Graph**: Force-directed physics canvas showing RF connections, signal qualities, and hop paths.
+  - **Real-Time Stream**: Live SSE event feed of channel messages and adverts.
+  - **Remote Controls**: Trigger radio RTC time synchronization or radio reboots directly from your browser.
+
+---
+
+## License & Acknowledgements
+
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+### Acknowledgements
+- Special thanks to **Adam Gessaman and contributors** ([agessaman/meshcore-bot](https://github.com/agessaman/meshcore-bot)) for pioneering bot command concepts, rate-limiting ideas, and inspirations that helped shape this project.
+- Thanks to the **MeshCore** project for the official Python `meshcore` library.

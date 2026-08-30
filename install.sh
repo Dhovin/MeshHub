@@ -83,7 +83,7 @@ echo "[Install] Upgrading pip, setuptools, and wheel in virtual environment..."
 "${VENV_DIR}/bin/pip" install --upgrade pip setuptools wheel
 
 echo "[Install] Installing Python libraries (pyserial, bleak, meshcore, meshcore-cli, paho-mqtt, pynacl) inside virtual environment..."
-"${VENV_DIR}/bin/pip" install pyserial bleak meshcore meshcore-cli paho-mqtt pynacl
+"${VENV_DIR}/bin/pip" install pyserial bleak meshcore meshcore-cli paho-mqtt pynacl aiohttp
 
 # 4. Setup Project Configuration
 CONFIG_FILE="${REPO_DIR}/config/config.json"
@@ -129,27 +129,31 @@ else
   echo "[Install] Existing config.json found. Keeping original settings."
 fi
 
-# 5. Create the global shell wrapper runner
-echo "[Install] Deploying global CLI runner wrapper to /usr/local/bin/meshbot..."
-WRAPPER_PATH="/usr/local/bin/meshbot"
+# 5. Create global shell wrapper runners
+echo "[Install] Deploying global CLI runner wrappers to /usr/local/bin/meshhub and /usr/local/bin/meshbot..."
+WRAPPER_PATH="/usr/local/bin/meshhub"
+LEGACY_WRAPPER_PATH="/usr/local/bin/meshbot"
 
 sudo bash -c "cat > ${WRAPPER_PATH}" <<EOF
 #!/bin/sh
-# Shell wrapper routing meshbot command calls to the virtual environment
-exec "${VENV_DIR}/bin/python" "${REPO_DIR}/bin/meshbot" "\$@"
+# Shell wrapper routing meshhub command calls to the virtual environment
+exec "${VENV_DIR}/bin/python" "${REPO_DIR}/bin/meshhub" "\$@"
 EOF
 
 sudo chmod +x "${WRAPPER_PATH}"
-echo "[Install] CLI wrapper successfully created at ${WRAPPER_PATH}."
+sudo ln -sf "${WRAPPER_PATH}" "${LEGACY_WRAPPER_PATH}"
+echo "[Install] CLI wrappers successfully created at ${WRAPPER_PATH} and ${LEGACY_WRAPPER_PATH}."
 
 # 6. Generate systemd Service file
 echo "[Install] Generating systemd service unit file..."
-SERVICE_PATH="/etc/systemd/system/meshcore-bot.service"
+SERVICE_PATH="/etc/systemd/system/meshhub.service"
+LEGACY_SERVICE_PATH="/etc/systemd/system/meshcore-bot.service"
 
 sudo bash -c "cat > ${SERVICE_PATH}" <<EOF
 [Unit]
-Description=MeshCore-bot Central Hub Daemon
+Description=MeshHub Central Hub Daemon
 After=network.target
+Alias=meshcore-bot.service
 
 [Service]
 Type=simple
@@ -166,15 +170,16 @@ EOF
 # 7. Reload systemd, enable and start service
 echo "[Install] Enabling and starting systemd service..."
 sudo systemctl daemon-reload
-sudo systemctl enable meshcore-bot.service
-sudo systemctl start meshcore-bot.service
+sudo systemctl enable meshhub.service
+sudo systemctl start meshhub.service
 
 echo "=================================================="
-echo "MeshCore-bot Installation Complete!"
+echo "MeshHub Installation Complete!"
 echo "=================================================="
 echo "Verification instructions:"
-echo "1. Check service status: sudo systemctl status meshcore-bot"
-echo "2. View logs: sudo journalctl -u meshcore-bot -f"
-echo "3. Run config wizard: meshbot config"
-echo "4. Check bot config status: meshbot status"
+echo "1. Check service status: sudo systemctl status meshhub"
+echo "2. View logs: sudo journalctl -u meshhub -f"
+echo "3. Run config wizard: meshhub config"
+echo "4. Open Web Viewer dashboard: http://<device-ip>:8080"
+echo "5. Check status: meshhub status (or meshbot status)"
 echo "=================================================="

@@ -10,9 +10,22 @@
   "core": {
     "timeSyncInterval": "0 0 * * *",
     "shutdownTimeoutMs": 10000,
-    "ipcPort": 5002
+    "ipcPort": 5002,
+    "rateLimiting": {
+      "txRateLimitSeconds": 1.0,
+      "perUserRateLimitSeconds": 30.0,
+      "channelLimits": {
+        "emergency": 0.0
+      }
+    }
   },
   "modules": {
+    "web_viewer": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8080,
+      "password": ""
+    },
     "autoresponce": {
       "enabled": true,
       "channels": [

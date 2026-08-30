@@ -6,6 +6,7 @@ import asyncio
 import serial.tools.list_ports
 from meshcore.meshcore import MeshCore
 from meshcore.events import EventType
+from core.rate_limiter import BotTxRateLimiter
 
 logger = logging.getLogger("ConnectionManager")
 
@@ -22,6 +23,10 @@ class ConnectionManager:
         self.isConnected = False
         self.connectionType = None
         self.deviceInfo = None
+        self.tx_limiter = BotTxRateLimiter(
+            self.bot.config.get("core", {}).get("rateLimiting", {}).get("txRateLimitSeconds", 1.0)
+            if hasattr(self.bot, "config") and self.bot.config else 1.0
+        )
 
     async def connect(self):
         """
@@ -220,6 +225,10 @@ class ConnectionManager:
             if not is_allowed:
                 logger.warning(f"Access denied: Module '{active_module}' attempted to access unauthorized channel '{denied_channel}'.")
                 return {"error": f"Access denied: Module '{active_module}' is not authorized to use channel '{denied_channel}'."}
+
+        # Enforce airtime transmission rate limits
+        if self.tx_limiter and cmd in ("chan", "ch", "msg", "send_raw", "advert", "send"):
+            await self.tx_limiter.wait_for_tx()
 
         try:
             if cmd in ("infos", "i", "query", "q", "ver", "v"):
