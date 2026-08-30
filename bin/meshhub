@@ -487,16 +487,38 @@ def is_process_running(pid):
                 return True
             return False
 
+def get_systemd_service_name():
+    """Detect active or installed systemd service for MeshHub."""
+    if sys.platform == "win32":
+        return None
+    for s in ["meshhub.service", "meshcore-bot.service", "MeshHub.service"]:
+        if os.path.exists(f"/etc/systemd/system/{s}"):
+            return s.replace(".service", "")
+    return None
+
+def get_pid_path():
+    for p in ["config/meshhub.pid", "config/meshbot.pid", "config/MeshHub.pid"]:
+        if os.path.exists(p):
+            return p
+    return "config/meshhub.pid"
+
+def get_log_path():
+    for p in ["config/meshhub.log", "config/meshbot.log", "config/MeshHub.log"]:
+        if os.path.exists(p):
+            return p
+    return "config/meshhub.log"
+
 def run_status():
     # If Linux and systemd service exists, delegate to systemctl status
-    if sys.platform != "win32" and os.path.exists("/etc/systemd/system/MeshHub.service"):
+    svc = get_systemd_service_name()
+    if svc:
         import subprocess
-        print("Checking systemd service status...")
-        subprocess.run(["sudo", "systemctl", "status", "MeshHub"])
+        print(f"Checking systemd service status ({svc})...")
+        subprocess.run(["sudo", "systemctl", "status", svc])
         return
 
     config_path = "config/config.json"
-    pid_path = "config/MeshHub.pid"
+    pid_path = get_pid_path()
     
     print("==================================================")
     print("           MeshHub Daemon Status             ")
@@ -550,15 +572,15 @@ def run_status():
         print("\nNo config.json found.")
 
 def run_stop():
-    pid_path = "config/MeshHub.pid"
-    
     # If Linux and systemd service exists, stop it via systemd
-    if sys.platform != "win32" and os.path.exists("/etc/systemd/system/MeshHub.service"):
+    svc = get_systemd_service_name()
+    if svc:
         import subprocess
-        print("Stopping systemd service...")
-        res = subprocess.run(["sudo", "systemctl", "stop", "MeshHub"])
+        print(f"Stopping systemd service ({svc})...")
+        res = subprocess.run(["sudo", "systemctl", "stop", svc])
         return res.returncode == 0
         
+    pid_path = get_pid_path()
     if not os.path.exists(pid_path):
         print("No PID file found. Daemon is likely stopped.")
         return True
@@ -614,10 +636,11 @@ def run_stop():
 
 def run_restart():
     # If Linux and systemd service exists, restart it via systemd
-    if sys.platform != "win32" and os.path.exists("/etc/systemd/system/MeshHub.service"):
+    svc = get_systemd_service_name()
+    if svc:
         import subprocess
-        print("Restarting systemd service...")
-        subprocess.run(["sudo", "systemctl", "restart", "MeshHub"])
+        print(f"Restarting systemd service ({svc})...")
+        subprocess.run(["sudo", "systemctl", "restart", svc])
         return
         
     print("Restarting daemon...")
@@ -647,16 +670,17 @@ def run_restart():
 
 def run_logs():
     # If Linux and systemd service exists, use journalctl
-    if sys.platform != "win32" and os.path.exists("/etc/systemd/system/MeshHub.service"):
+    svc = get_systemd_service_name()
+    if svc:
         import subprocess
-        print("Streaming systemd service logs (Press Ctrl+C to exit)...")
+        print(f"Streaming systemd service logs ({svc}) (Press Ctrl+C to exit)...")
         try:
-            subprocess.run(["journalctl", "-u", "MeshHub", "-f"])
+            subprocess.run(["journalctl", "-u", svc, "-f"])
         except KeyboardInterrupt:
             pass
         return
         
-    log_path = "config/MeshHub.log"
+    log_path = get_log_path()
     if not os.path.exists(log_path):
         print(f"No log file found at {log_path}.")
         return
@@ -988,7 +1012,7 @@ def run_update():
     except Exception as e:
         print(f"[Warning] Failed to update Python dependencies: {e}")
 
-    # Ensure /usr/local/bin/meshhub CLI command exists on Linux
+    # Ensure /usr/local/bin/meshhub CLI command and systemd service exist on Linux
     if sys.platform != "win32":
         try:
             hub_cli = "/usr/local/bin/meshhub"
@@ -996,6 +1020,12 @@ def run_update():
             if not os.path.exists(hub_cli) and os.path.exists(bot_cli):
                 print("[Update] Creating /usr/local/bin/meshhub CLI link...")
                 subprocess.run(["sudo", "ln", "-sf", bot_cli, hub_cli], capture_output=True)
+                
+            hub_svc = "/etc/systemd/system/meshhub.service"
+            bot_svc = "/etc/systemd/system/meshcore-bot.service"
+            if not os.path.exists(hub_svc) and os.path.exists(bot_svc):
+                subprocess.run(["sudo", "ln", "-sf", bot_svc, hub_svc], capture_output=True)
+                subprocess.run(["sudo", "systemctl", "daemon-reload"], capture_output=True)
         except Exception:
             pass
         
@@ -1390,10 +1420,11 @@ def main():
             print()
             print_main_help()
             sys.exit(1)
-        if sys.platform != "win32" and os.path.exists("/etc/systemd/system/MeshHub.service"):
+        svc = get_systemd_service_name()
+        if svc:
             import subprocess
-            print("Starting systemd service...")
-            res = subprocess.run(["sudo", "systemctl", "start", "MeshHub"])
+            print(f"Starting systemd service ({svc})...")
+            res = subprocess.run(["sudo", "systemctl", "start", svc])
             sys.exit(res.returncode)
         else:
             bot = MeshHub()
