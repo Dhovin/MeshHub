@@ -262,11 +262,11 @@
                          (c.role === 'Repeater' || c.is_repeater ? '<span class="badge badge-repeater">Repeater</span>' : '<span class="badge badge-companion">Companion</span>');
         const snr = (c.snr !== undefined && c.snr !== null) ? c.snr + ' dB' : '—';
         const rssi = (c.rssi !== undefined && c.rssi !== null) ? c.rssi + ' dBm' : '—';
-        const hops = c.hops !== undefined ? c.hops : '—';
+        const hops = (c.hops !== undefined && c.hops !== null && c.hops !== -1) ? c.hops : '—';
         const lastSeen = c.last_seen ? new Date(c.last_seen * 1000).toLocaleTimeString() : 'Recent';
         return `<tr>
           <td>${roleBadge}</td>
-          <td style="font-weight:600">${c.name || 'Unnamed'}</td>
+          <td style="font-weight:600">${c.name || c.adv_name || 'Unnamed'}</td>
           <td style="font-family:monospace; color:var(--text-muted)">${(c.public_key || '').substring(0, 16)}...</td>
           <td>${snr} / ${rssi}</td>
           <td>${hops}</td>

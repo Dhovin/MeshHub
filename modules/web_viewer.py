@@ -96,6 +96,7 @@ class WebViewer:
         # Subscriptions
         self.unsub_msg = self.api.subscribe("message", self._on_message)
         self.unsub_adv = self.api.subscribe("advert", self._on_advert)
+        self.unsub_new = self.api.subscribe("new_contact", self._on_advert)
         self.unsub_con = self.api.subscribe("connect", self._on_connect)
         self.unsub_path = self.api.subscribe("path_update", self._on_path_update)
 
@@ -110,7 +111,7 @@ class WebViewer:
 
     async def stop(self):
         logger.info(f"[{self.name}] Stopping Web Viewer...")
-        for unsub in (self.unsub_msg, self.unsub_adv, self.unsub_con, self.unsub_path):
+        for unsub in (self.unsub_msg, self.unsub_adv, self.unsub_new, self.unsub_con, self.unsub_path):
             if unsub:
                 try:
                     unsub()
@@ -157,23 +158,153 @@ class WebViewer:
         }
         return web.json_response(data)
 
+    def _find_contact(self, key_or_name):
+        cm = getattr(self.api.bot, "connection_manager", None)
+        mc = getattr(cm, "mc", None) if cm else None
+        if not mc or not key_or_name:
+            return None
+        
+        # 1. Search by key prefix if hex
+        if hasattr(mc, "get_contact_by_key_prefix"):
+            try:
+                found = mc.get_contact_by_key_prefix(str(key_or_name))
+                if isinstance(found, dict):
+                    return found
+            except Exception:
+                pass
+                
+        # 2. Search by name
+        if hasattr(mc, "get_contact_by_name"):
+            try:
+                found = mc.get_contact_by_name(str(key_or_name))
+                if isinstance(found, dict):
+                    return found
+            except Exception:
+                pass
+
+        # 3. Search in mc.contacts or mc._contacts dict
+        contacts_dict = getattr(mc, "contacts", None)
+        if not contacts_dict or not isinstance(contacts_dict, (dict, list)):
+            contacts_dict = getattr(mc, "_contacts", None)
+            
+        if contacts_dict and isinstance(contacts_dict, dict):
+            key_lower = str(key_or_name).lower()
+            for pk, c in contacts_dict.items():
+                if not isinstance(c, dict):
+                    continue
+                c_pk = str(c.get("public_key", pk)).lower()
+                c_name = str(c.get("adv_name") or c.get("name", "")).lower()
+                if c_pk.startswith(key_lower) or c_name == key_lower:
+                    return c
+        elif contacts_dict and isinstance(contacts_dict, list):
+            key_lower = str(key_or_name).lower()
+            for c in contacts_dict:
+                if not isinstance(c, dict):
+                    continue
+                c_pk = str(c.get("public_key", "")).lower()
+                c_name = str(c.get("adv_name") or c.get("name", "")).lower()
+                if c_pk.startswith(key_lower) or c_name == key_lower:
+                    return c
+        return None
+
+    def _is_repeater(self, contact_or_payload, name=""):
+        data = contact_or_payload or {}
+        if not isinstance(data, dict):
+            data = {}
+        c_type = data.get("type")
+        if c_type in (2, 3):
+            return True
+        if data.get("is_repeater"):
+            return True
+        role_val = str(data.get("role", "")).lower()
+        if "repeater" in role_val or "roomserver" in role_val:
+            return True
+        check_name = (name or data.get("adv_name") or data.get("name") or "").lower()
+        if any(w in check_name for w in ["repeater", "roompeater", "relay", "gateway", "room server", "roomserver"]):
+            return True
+        if check_name.startswith("r-") or check_name.startswith("rpt-") or check_name.startswith("rpt "):
+            return True
+        return False
+
     async def handle_api_contacts(self, request):
-        contacts = []
+        contacts_dict = {}
         cm = getattr(self.api.bot, "connection_manager", None)
         mc = getattr(cm, "mc", None) if cm else None
         
-        if mc and hasattr(mc, "contacts"):
-            for c in mc.contacts:
-                if isinstance(c, dict):
-                    contacts.append(c)
-                elif hasattr(c, "__dict__"):
-                    contacts.append(c.__dict__)
+        # 1. Populate from mc.contacts / mc._contacts (radio node contacts)
+        source_contacts = None
+        if mc:
+            if hasattr(mc, "contacts") and isinstance(mc.contacts, (dict, list)) and mc.contacts:
+                source_contacts = mc.contacts
+            elif hasattr(mc, "_contacts") and isinstance(mc._contacts, (dict, list)) and mc._contacts:
+                source_contacts = mc._contacts
 
-        for pk, node in self.nodes.items():
-            if not any(c.get("public_key") == pk for c in contacts):
-                contacts.append(node)
+        if source_contacts:
+            if isinstance(source_contacts, dict):
+                items = source_contacts.items()
+            elif isinstance(source_contacts, list):
+                items = [(c.get("public_key", f"item_{idx}"), c) for idx, c in enumerate(source_contacts) if isinstance(c, dict)]
+            else:
+                items = []
+
+            for pk, c in items:
+                if not isinstance(c, dict):
+                    continue
+                pubkey = c.get("public_key") or pk
+                name = c.get("adv_name") or c.get("name") or pubkey[:8]
+                is_rep = self._is_repeater(c, name)
+                c_type = c.get("type", 2 if is_rep else 1)
+                role = "Repeater" if is_rep else ("RoomServer" if c_type == 3 else "Companion")
                 
-        return web.json_response(contacts)
+                contacts_dict[pubkey] = {
+                    "public_key": pubkey,
+                    "name": name,
+                    "adv_name": name,
+                    "role": role,
+                    "is_repeater": is_rep,
+                    "type": c_type,
+                    "lat": c.get("adv_lat") or c.get("lat"),
+                    "lon": c.get("adv_lon") or c.get("lon"),
+                    "hops": c.get("out_path_len") if (isinstance(c.get("out_path_len"), int) and c.get("out_path_len") >= 0) else None,
+                    "last_seen": c.get("last_advert") or c.get("lastmod") or time.time()
+                }
+
+        # 2. Merge observed nodes from runtime traffic
+        for pk, node in self.nodes.items():
+            matched_key = None
+            if pk in contacts_dict:
+                matched_key = pk
+            else:
+                # Try matching by name
+                for k, v in contacts_dict.items():
+                    if v.get("name") and v.get("name") == node.get("name"):
+                        matched_key = k
+                        break
+                        
+            if matched_key:
+                entry = contacts_dict[matched_key]
+                if node.get("snr") is not None:
+                    entry["snr"] = node.get("snr")
+                if node.get("rssi") is not None:
+                    entry["rssi"] = node.get("rssi")
+                if node.get("hops") is not None:
+                    entry["hops"] = node.get("hops")
+                if node.get("last_seen"):
+                    entry["last_seen"] = node.get("last_seen")
+                if node.get("name") and node["name"] != pk[:8] and not entry.get("name"):
+                    entry["name"] = node["name"]
+            else:
+                contacts_dict[pk] = dict(node)
+
+        # Ensure display names and sort
+        result = []
+        for c in contacts_dict.values():
+            if not c.get("name"):
+                c["name"] = c.get("adv_name") or (c.get("public_key", "")[:8] if c.get("public_key") else "Unnamed")
+            result.append(c)
+
+        result.sort(key=lambda x: x.get("last_seen") or 0, reverse=True)
+        return web.json_response(result)
 
     async def handle_api_graph(self, request):
         cm = getattr(self.api.bot, "connection_manager", None)
@@ -261,6 +392,10 @@ class WebViewer:
         snr = data.get("snr")
         rssi = data.get("rssi")
         path = data.get("path")
+        hops = data.get("hops")
+        if hops is None and data.get("path_len") is not None:
+            pl = data.get("path_len")
+            hops = 0 if pl == 255 else pl
         
         msg_record = {
             "sender": sender,
@@ -269,16 +404,31 @@ class WebViewer:
             "snr": snr,
             "rssi": rssi,
             "path": path,
+            "hops": hops,
             "time": time.strftime("%H:%M:%S")
         }
         self.messages.append(msg_record)
         
         if sender and sender != "unknown":
-            pk = sender
-            if pk not in self.nodes:
-                self.nodes[pk] = {"name": sender, "public_key": pk, "role": "Companion", "last_seen": time.time()}
-            else:
-                self.nodes[pk]["last_seen"] = time.time()
+            contact = self._find_contact(sender)
+            pk = contact.get("public_key") if contact else sender
+            name = sender
+            if contact and (contact.get("adv_name") or contact.get("name")):
+                name = contact.get("adv_name") or contact.get("name")
+                
+            is_rep = self._is_repeater(contact, name)
+            role = "Repeater" if is_rep else "Companion"
+            
+            self.nodes[pk] = {
+                "name": name,
+                "public_key": pk,
+                "role": role,
+                "is_repeater": is_rep,
+                "snr": snr,
+                "rssi": rssi,
+                "hops": hops,
+                "last_seen": time.time()
+            }
                 
             edge_key = f"self_{pk}"
             self.edges[edge_key] = {
@@ -295,16 +445,24 @@ class WebViewer:
         pk = payload.get("public_key") or payload.get("key")
         if not pk:
             return
-            
-        name = payload.get("name") or payload.get("node_name") or str(pk)[:8]
-        role = "Repeater" if payload.get("is_repeater") else "Companion"
-        lat = payload.get("lat")
-        lon = payload.get("lon")
+
+        contact = self._find_contact(pk)
+        name = payload.get("adv_name") or payload.get("name") or payload.get("node_name")
+        if not name and contact:
+            name = contact.get("adv_name") or contact.get("name")
+        if not name:
+            name = str(pk)[:8]
+
+        is_rep = self._is_repeater(payload, name) or (contact and self._is_repeater(contact, name))
+        role = "Repeater" if is_rep else "Companion"
+        lat = payload.get("lat") or payload.get("adv_lat") or (contact.get("adv_lat") if contact else None)
+        lon = payload.get("lon") or payload.get("adv_lon") or (contact.get("adv_lon") if contact else None)
         
         self.nodes[pk] = {
             "public_key": pk,
             "name": name,
             "role": role,
+            "is_repeater": is_rep,
             "lat": lat,
             "lon": lon,
             "last_seen": time.time()

@@ -1257,6 +1257,7 @@ class ConnectionManager:
     def _subscribe_events(self):
         # Native registrations
         self.mc.subscribe(EventType.CONTACTS, self._on_contacts_update)
+        self.mc.subscribe(EventType.NEXT_CONTACT, self._on_new_contact)
         self.mc.subscribe(EventType.CONTACT_MSG_RECV, self._on_private_message)
         self.mc.subscribe(EventType.CHANNEL_MSG_RECV, self._on_channel_message)
         self.mc.subscribe(EventType.ADVERTISEMENT, self._on_advertisement)
@@ -1473,35 +1474,57 @@ class ConnectionManager:
 
     def _on_advertisement(self, event):
         try:
-            self.bot.event_bus.publish("advert", event.payload)
-            payload = event.payload or {}
+            payload = dict(event.payload) if isinstance(event.payload, dict) else {}
             pubkey = payload.get("public_key")
-            if pubkey:
-                if hasattr(self, 'mc') and self.mc:
-                    if not hasattr(self.mc, '_contacts') or self.mc._contacts is None:
-                        self.mc._contacts = {}
-                    
-                    if pubkey not in self.mc._contacts:
-                        self.mc._contacts[pubkey] = {
-                            "public_key": pubkey,
-                            "type": payload.get("type", 1),
-                            "flags": payload.get("flags", 0),
-                            "adv_name": payload.get("adv_name") or payload.get("name") or f"Unknown-{pubkey[:6]}",
-                            "last_advert": payload.get("last_advert") or int(time.time()),
-                            "adv_lat": payload.get("adv_lat", 0.0),
-                            "adv_lon": payload.get("adv_lon", 0.0),
-                            "lastmod": payload.get("lastmod") or int(time.time())
-                        }
-                    else:
-                        contact = self.mc._contacts[pubkey]
-                        if payload.get("adv_name") or payload.get("name"):
-                            contact["adv_name"] = payload.get("adv_name") or payload.get("name")
-                        contact["last_advert"] = payload.get("last_advert") or int(time.time())
-                        if "adv_lat" in payload:
-                            contact["adv_lat"] = payload["adv_lat"]
-                        if "adv_lon" in payload:
-                            contact["adv_lon"] = payload["adv_lon"]
-                        contact["lastmod"] = payload.get("lastmod") or int(time.time())
+            
+            # Lookup contact from mc to populate adv_name, type (repeater/companion)
+            contact = None
+            if hasattr(self, 'mc') and self.mc and pubkey:
+                if hasattr(self.mc, 'get_contact_by_key_prefix'):
+                    contact = self.mc.get_contact_by_key_prefix(pubkey)
+                if not contact and hasattr(self.mc, '_contacts') and self.mc._contacts:
+                    contact = self.mc._contacts.get(pubkey)
+                if not contact and hasattr(self.mc, 'contacts') and isinstance(self.mc.contacts, dict):
+                    contact = self.mc.contacts.get(pubkey)
+
+            if contact:
+                for k, v in contact.items():
+                    if k not in payload or not payload[k]:
+                        payload[k] = v
+
+            # Dispatch enriched advertisement event
+            self.bot.event_bus.publish("advert", payload)
+            
+            if pubkey and hasattr(self, 'mc') and self.mc:
+                if not hasattr(self.mc, '_contacts') or self.mc._contacts is None:
+                    self.mc._contacts = {}
+                
+                if pubkey not in self.mc._contacts:
+                    adv_name = payload.get("adv_name") or payload.get("name")
+                    self.mc._contacts[pubkey] = {
+                        "public_key": pubkey,
+                        "type": payload.get("type", 1),
+                        "flags": payload.get("flags", 0),
+                        "adv_name": adv_name if adv_name else f"Node-{pubkey[:6]}",
+                        "last_advert": payload.get("last_advert") or int(time.time()),
+                        "adv_lat": payload.get("adv_lat", 0.0),
+                        "adv_lon": payload.get("adv_lon", 0.0),
+                        "lastmod": payload.get("lastmod") or int(time.time())
+                    }
+                else:
+                    c = self.mc._contacts[pubkey]
+                    if payload.get("adv_name") or payload.get("name"):
+                        c["adv_name"] = payload.get("adv_name") or payload.get("name")
+                    if "type" in payload and payload["type"] is not None:
+                        c["type"] = payload["type"]
+                    if "flags" in payload and payload["flags"] is not None:
+                        c["flags"] = payload["flags"]
+                    c["last_advert"] = payload.get("last_advert") or int(time.time())
+                    if "adv_lat" in payload and payload["adv_lat"]:
+                        c["adv_lat"] = payload["adv_lat"]
+                    if "adv_lon" in payload and payload["adv_lon"]:
+                        c["adv_lon"] = payload["adv_lon"]
+                    c["lastmod"] = payload.get("lastmod") or int(time.time())
                 self._save_contacts()
         except Exception as e:
             logger.error(f"Error handling advertisement event: {e}", exc_info=True)
@@ -1514,7 +1537,13 @@ class ConnectionManager:
 
     def _on_new_contact(self, event):
         try:
-            self.bot.event_bus.publish("new_contact", event.payload)
+            payload = event.payload or {}
+            pubkey = payload.get("public_key")
+            if pubkey and hasattr(self, 'mc') and self.mc:
+                if not hasattr(self.mc, '_contacts') or self.mc._contacts is None:
+                    self.mc._contacts = {}
+                self.mc._contacts[pubkey] = payload
+            self.bot.event_bus.publish("new_contact", payload)
             self._save_contacts()
         except Exception as e:
             logger.error(f"Error handling new contact event: {e}", exc_info=True)
