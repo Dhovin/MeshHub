@@ -19,7 +19,12 @@ class Autoresponce:
                     "type": "array",
                     "items": {"type": "string"}
                 },
-                "responseTemplate": {"type": "string"}
+                "responseTemplate": {"type": "string"},
+                "maxHops": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 64
+                }
             },
             "required": ["enabled"]
         }
@@ -47,6 +52,15 @@ class Autoresponce:
         val = input(f"Enter Comma-Separated Channels to listen on [current: {', '.join(current_channels)}]: ").strip()
         if val:
             config["channels"] = [x.strip() for x in val.split(",") if x.strip()]
+
+        # 3. Max hops
+        current_max_hops = config.get("maxHops")
+        val = input(f"Max Hops limit to respond to (0 for direct-only, blank for unlimited) [current: {current_max_hops if current_max_hops is not None else 'unlimited'}]: ").strip()
+        if val:
+            if val.lower() in ("none", "unlimited", "no", "all"):
+                config.pop("maxHops", None)
+            elif val.isdigit():
+                config["maxHops"] = int(val)
             
         return config
 
@@ -59,11 +73,17 @@ class Autoresponce:
         self.config = config
         self.channels = config.get("channels", ["#test", "#testing"])
         self.response_template = config.get("responseTemplate", "@[{sender}] ACK | Path: {hops_label}")
+        self.max_hops = config.get("maxHops")
+        if self.max_hops is not None:
+            try:
+                self.max_hops = int(self.max_hops)
+            except (ValueError, TypeError):
+                self.max_hops = None
         
         # Declare only the exact channels to the bot API
         self.api.declare_channels(self.channels)
         
-        logger.info(f"[{self.name}] Initialized with channels: {self.channels}, template: {self.response_template}")
+        logger.info(f"[{self.name}] Initialized with channels: {self.channels}, maxHops: {self.max_hops}, template: {self.response_template}")
 
     async def start(self):
         """
@@ -131,6 +151,18 @@ class Autoresponce:
                 break
 
         if not is_target_channel or target_idx is None:
+            return
+
+        # Hop distance limit check
+        hops = data.get("hops")
+        if hops is None and data.get("path_len") is not None:
+            pl = data.get("path_len")
+            hops = 0 if pl == 255 else pl
+        if hops is None:
+            hops = 0
+
+        if self.max_hops is not None and hops > self.max_hops:
+            logger.info(f"[{self.name}] Skipping reply to '{sender}': packet hop count {hops} exceeds maxHops limit ({self.max_hops}).")
             return
 
         # Airtime & per-user rate limit checks

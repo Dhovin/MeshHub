@@ -31,7 +31,9 @@
       "channels": [
         "#test",
         "#testing"
-      ]
+      ],
+      "responseTemplate": "@[{sender}] ACK | Path: {hops_label}",
+      "maxHops": 3
     },
     "net_bot": {
       "enabled": true,
