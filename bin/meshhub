@@ -987,6 +987,17 @@ def run_update():
             print("[Warning] Failed to update some Python dependencies.")
     except Exception as e:
         print(f"[Warning] Failed to update Python dependencies: {e}")
+
+    # Ensure /usr/local/bin/meshhub CLI command exists on Linux
+    if sys.platform != "win32":
+        try:
+            hub_cli = "/usr/local/bin/meshhub"
+            bot_cli = "/usr/local/bin/meshbot"
+            if not os.path.exists(hub_cli) and os.path.exists(bot_cli):
+                print("[Update] Creating /usr/local/bin/meshhub CLI link...")
+                subprocess.run(["sudo", "ln", "-sf", bot_cli, hub_cli], capture_output=True)
+        except Exception:
+            pass
         
     # 3. Restart the daemon
     print("\n[Update] Restarting MeshHub daemon...")
