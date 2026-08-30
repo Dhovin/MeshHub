@@ -54,11 +54,11 @@ class Autoresponce:
             config["channels"] = [x.strip() for x in val.split(",") if x.strip()]
 
         # 3. Max hops
-        current_max_hops = config.get("maxHops")
+        current_max_hops = config.get("maxHops", 15)
         val = input(f"Max Hops limit to respond to (0 for direct-only, blank for unlimited) [current: {current_max_hops if current_max_hops is not None else 'unlimited'}]: ").strip()
         if val:
             if val.lower() in ("none", "unlimited", "no", "all"):
-                config.pop("maxHops", None)
+                config["maxHops"] = None
             elif val.isdigit():
                 config["maxHops"] = int(val)
             
@@ -73,12 +73,12 @@ class Autoresponce:
         self.config = config
         self.channels = config.get("channels", ["#test", "#testing"])
         self.response_template = config.get("responseTemplate", "@[{sender}] ACK | Path: {hops_label}")
-        self.max_hops = config.get("maxHops")
+        self.max_hops = config.get("maxHops", 15)
         if self.max_hops is not None:
             try:
                 self.max_hops = int(self.max_hops)
             except (ValueError, TypeError):
-                self.max_hops = None
+                self.max_hops = 15
         
         # Declare only the exact channels to the bot API
         self.api.declare_channels(self.channels)
