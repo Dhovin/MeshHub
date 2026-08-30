@@ -38,30 +38,70 @@ def extract_template_fields(message_data: dict, timezone_str: str = "UTC", state
     snr_str = f"{snr_val}dB" if snr_val is not None else "N/A"
     rssi_str = f"{rssi_val}dBm" if rssi_val is not None else "N/A"
 
-    # Path & Hops
+    # Path & Hops extraction
     path = data.get("path")
-    hops = 0
+    path_len = data.get("path_len")
+    path_hash_mode = data.get("path_hash_mode")
+    hops_input = data.get("hops")
+
+    hops = None
+    if hops_input is not None:
+        try:
+            hops = int(hops_input)
+        except (ValueError, TypeError):
+            pass
+
+    if hops is None and path_len is not None:
+        try:
+            pl = int(path_len)
+            if pl == 255:
+                hops = 0
+            elif pl >= 0:
+                hops = pl
+        except (ValueError, TypeError):
+            pass
+
+    node_hashes = []
     if path:
         if isinstance(path, list):
-            hops = max(0, len(path) - 1)
-            path_str = " > ".join(str(p) for p in path)
-        else:
-            path_str = str(path)
-            # Count hops if separated by commas or arrows
-            if ">" in path_str:
-                hops = path_str.count(">")
-            elif "," in path_str:
-                hops = path_str.count(",")
-    else:
-        path_str = "Direct"
+            node_hashes = [str(p) for p in path if str(p).strip()]
+            if hops is None:
+                hops = max(0, len(node_hashes) - 1) if len(node_hashes) > 1 else len(node_hashes)
+        elif isinstance(path, str):
+            p_str = path.strip()
+            if ">" in p_str:
+                node_hashes = [p.strip() for p in p_str.split(">") if p.strip()]
+                if hops is None:
+                    hops = max(0, len(node_hashes) - 1) if len(node_hashes) > 1 else len(node_hashes)
+            elif "," in p_str:
+                node_hashes = [p.strip() for p in p_str.split(",") if p.strip()]
+                if hops is None:
+                    hops = len(node_hashes)
+            elif re.match(r'^[0-9a-fA-F]+$', p_str):
+                bytes_per_hop = 1
+                if isinstance(path_hash_mode, int) and path_hash_mode >= 0:
+                    bytes_per_hop = path_hash_mode + 1
+                chunk_len = bytes_per_hop * 2
+                if len(p_str) >= chunk_len:
+                    node_hashes = [p_str[i:i+chunk_len] for i in range(0, len(p_str), chunk_len)]
+                    if hops is None:
+                        hops = len(node_hashes)
+            elif "direct" in p_str.lower() or "0 hop" in p_str.lower():
+                if hops is None:
+                    hops = 0
+
+    if hops is None:
         hops = 0
 
     if hops == 0:
         hops_label = "Direct (0 hops)"
+        path_str = "Direct"
     elif hops == 1:
         hops_label = "1 hop"
+        path_str = " > ".join(node_hashes) if node_hashes else "1 hop"
     else:
         hops_label = f"{hops} hops"
+        path_str = " > ".join(node_hashes) if node_hashes else f"{hops} hops"
 
     # Connection Info summary
     conn_parts = []
@@ -69,8 +109,14 @@ def extract_template_fields(message_data: dict, timezone_str: str = "UTC", state
         conn_parts.append(f"SNR: {snr_str}")
     if rssi_val is not None:
         conn_parts.append(f"RSSI: {rssi_str}")
-    if path_str:
-        conn_parts.append(f"Path: {hops_label}")
+    
+    if hops == 0:
+        conn_parts.append("Path: Direct (0 hops)")
+    else:
+        if node_hashes and len(node_hashes) > 1:
+            conn_parts.append(f"Path: {hops_label} ({path_str})")
+        else:
+            conn_parts.append(f"Path: {hops_label}")
     conn_info = " | ".join(conn_parts) if conn_parts else "LoRa"
 
     # Timezone-aware timestamp

@@ -44,5 +44,29 @@ class TestTemplateEngine(unittest.TestCase):
         result = format_template(tpl, fields)
         self.assertEqual(result, "Line 1: Bob\nLine 2: {unknown_var}")
 
+    def test_meshcore_path_len_and_hops(self):
+        # Case 1: 6 hops as received in MeshCore CHANNEL_MSG_RECV
+        msg_6hops = {
+            "sender": "SamDFW Car",
+            "snr": 12.25,
+            "path_len": 6,
+            "path_hash_mode": 1
+        }
+        fields_6 = extract_template_fields(msg_6hops)
+        self.assertEqual(fields_6["hops"], "6")
+        self.assertEqual(fields_6["hops_label"], "6 hops")
+        self.assertIn("Path: 6 hops", fields_6["connection_info"])
+
+        # Case 2: Direct packet (path_len = 255 per protocol spec)
+        msg_direct = {
+            "sender": "LocalNode",
+            "snr": 10.0,
+            "path_len": 255
+        }
+        fields_dir = extract_template_fields(msg_direct)
+        self.assertEqual(fields_dir["hops"], "0")
+        self.assertEqual(fields_dir["hops_label"], "Direct (0 hops)")
+        self.assertIn("Path: Direct (0 hops)", fields_dir["connection_info"])
+
 if __name__ == "__main__":
     unittest.main()

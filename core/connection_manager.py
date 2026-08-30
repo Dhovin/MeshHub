@@ -1364,14 +1364,18 @@ class ConnectionManager:
             if not sender:
                 sender = "unknown"
                 
+            path_len = payload.get("path_len")
             msg = {
                 "sender": sender,
                 "text": text_val,
                 "channel": None,
                 "timestamp": payload.get("time") or payload.get("sender_timestamp") or int(time.time()),
-                "snr": payload.get("snr") or payload.get("SNR"),
-                "rssi": payload.get("rssi") or payload.get("RSSI"),
-                "path": payload.get("path", [])
+                "snr": payload.get("snr") if payload.get("snr") is not None else payload.get("SNR"),
+                "rssi": payload.get("rssi") if payload.get("rssi") is not None else payload.get("RSSI"),
+                "path": payload.get("path"),
+                "path_len": path_len,
+                "path_hash_mode": payload.get("path_hash_mode"),
+                "hops": 0 if path_len == 255 else (path_len if path_len is not None else None)
             }
             self.bot.event_bus.publish("message", msg)
         except Exception as e:
@@ -1450,14 +1454,18 @@ class ConnectionManager:
                         if match2:
                             text_val = match2.group(1)
                     
+            path_len = payload.get("path_len")
             msg = {
                 "sender": sender,
                 "text": text_val,
                 "channel": channel_val,
                 "timestamp": payload.get("time") or payload.get("sender_timestamp") or int(time.time()),
-                "snr": payload.get("snr") or payload.get("SNR"),
-                "rssi": payload.get("rssi") or payload.get("RSSI"),
-                "path": payload.get("path", [])
+                "snr": payload.get("snr") if payload.get("snr") is not None else payload.get("SNR"),
+                "rssi": payload.get("rssi") if payload.get("rssi") is not None else payload.get("RSSI"),
+                "path": payload.get("path"),
+                "path_len": path_len,
+                "path_hash_mode": payload.get("path_hash_mode"),
+                "hops": 0 if path_len == 255 else (path_len if path_len is not None else None)
             }
             self.bot.event_bus.publish("message", msg)
         except Exception as e:
