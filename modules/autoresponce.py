@@ -58,7 +58,7 @@ class Autoresponce:
         self.api = api
         self.config = config
         self.channels = config.get("channels", ["#test", "#testing"])
-        self.response_template = config.get("responseTemplate", "@[{sender}] ACK | {connection_info}")
+        self.response_template = config.get("responseTemplate", "@[{sender}] ACK | Path: {hops_label}")
         
         # Declare only the exact channels to the bot API
         self.api.declare_channels(self.channels)

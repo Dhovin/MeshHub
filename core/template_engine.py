@@ -103,13 +103,8 @@ def extract_template_fields(message_data: dict, timezone_str: str = "UTC", state
         hops_label = f"{hops} hops"
         path_str = " > ".join(node_hashes) if node_hashes else f"{hops} hops"
 
-    # Connection Info summary
+    # Connection Info summary (Path only, SNR/RSSI available as separate {snr}/{rssi} placeholders)
     conn_parts = []
-    if snr_val is not None:
-        conn_parts.append(f"SNR: {snr_str}")
-    if rssi_val is not None:
-        conn_parts.append(f"RSSI: {rssi_str}")
-    
     if hops == 0:
         conn_parts.append("Path: Direct (0 hops)")
     else:
@@ -117,7 +112,7 @@ def extract_template_fields(message_data: dict, timezone_str: str = "UTC", state
             conn_parts.append(f"Path: {hops_label} ({path_str})")
         else:
             conn_parts.append(f"Path: {hops_label}")
-    conn_info = " | ".join(conn_parts) if conn_parts else "LoRa"
+    conn_info = " | ".join(conn_parts) if conn_parts else f"Path: {hops_label}"
 
     # Timezone-aware timestamp
     try:
