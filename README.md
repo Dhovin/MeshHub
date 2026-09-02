@@ -31,9 +31,9 @@ MeshHub/
 ├── config/
 │   ├── config.json         # Centralized configuration settings
 │   ├── schema.json         # JSON Schema for config.json validation
-│   └── meshbot.pid         # Process ID lockfile generated at startup
+│   └── meshhub.pid         # Process ID lockfile generated at startup
 ├── core/
-│   ├── bot.py              # Main bot coordinator & bootstrapper
+│   ├── bot.py              # Main hub coordinator & bootstrapper
 │   ├── connection_manager.py # Native meshcore library connector & auto-discovery
 │   ├── event_bus.py        # Asynchronous sync/async event broker
 │   ├── module_manager.py   # Dynamic importlib module loader & sandbox
@@ -68,7 +68,7 @@ MeshHub/
 ### Prerequisites
 
 - **Python**: Version 3.10 or higher.
-- **System Packages** (for BLE support): `bluez` and development build tools are recommended on Linux.
+- **System Packages** (for BLE and C-extension build support): `bluez`, `libffi-dev`, `libssl-dev`, and build essentials.
 
 ### Development Environment Setup
 
@@ -87,12 +87,12 @@ python -m unittest discover -s tests -p "*.py"
 
 #### Quick One-Liner Installation & Uninstall
 
-To automatically download the code, clone it into your home directory (`~/Meshcore-bot`), set up the service, dependencies, virtual environment, and install the global `meshbot` CLI command with a single line:
+To automatically download the code, clone it into your home directory (`~/MeshHub`), set up the service, dependencies, virtual environment, and install the global `meshhub` (and `meshbot`) CLI commands with a single line:
 ```bash
 curl -sSL https://raw.githubusercontent.com/Dhovin/Meshcore-bot/main/install.sh | bash
 ```
 
-To completely stop services, wipe configuration and databases, and clean up the system-wide installation wrapper:
+To completely stop services, wipe configuration and databases, and clean up the system-wide installation wrappers:
 ```bash
 curl -sSL https://raw.githubusercontent.com/Dhovin/Meshcore-bot/main/uninstall.sh | bash
 ```
@@ -113,34 +113,35 @@ chmod +x uninstall.sh
 
 ---
 
-## Command Line Interface (`meshbot`)
+## Command Line Interface (`meshhub`)
 
-Once installed, the global `meshbot` tool is accessible (symlinked via wrapper to `/usr/local/bin/meshbot`):
+Once installed, the global `meshhub` tool is accessible (symlinked via wrapper to `/usr/local/bin/meshhub` and `/usr/local/bin/meshbot`):
 
-- **Start Daemon**: Starts the daemon. Interoperates with systemd on Linux (`sudo systemctl start meshcore-bot`), and runs in the foreground on Windows.
+- **Start Daemon**: Starts the daemon. Interoperates with systemd on Linux (`sudo systemctl start meshhub`), and runs in the foreground on Windows.
   ```bash
-  meshbot start
+  meshhub start
   ```
-- **Stop Daemon**: Stops the running daemon process. Runs `sudo systemctl stop meshcore-bot` on Linux, and terminates the PID on Windows.
+- **Stop Daemon**: Stops the running daemon process. Runs `sudo systemctl stop meshhub` on Linux, and terminates the PID on Windows.
   ```bash
-  meshbot stop
+  meshhub stop
   ```
-- **Restart Daemon**: Restarts the daemon. Runs `sudo systemctl restart meshcore-bot` on Linux, and spawns a background process on Windows.
+- **Restart Daemon**: Restarts the daemon. Runs `sudo systemctl restart meshhub` on Linux, and spawns a background process on Windows.
   ```bash
-  meshbot restart
+  meshhub restart
   ```
 - **Configuration Wizard**: Runs an interactive wizard using readline to scan serial ports or BLE nodes, prompting the user for parameters before generating and validating `config.json`.
   ```bash
-  meshbot config
+  meshhub config
   ```
-- **Status Dashboard**: Prints service diagnostics. Runs `sudo systemctl status meshcore-bot` on Linux, and reads active PID lockfile status on Windows.
+- **Status Dashboard**: Prints service diagnostics. Runs `sudo systemctl status meshhub` on Linux, and reads active PID lockfile status on Windows.
   ```bash
-  meshbot status
+  meshhub status
   ```
-- **Troubleshooting Logs**: Streams/tails the logs. Invokes `journalctl -u meshcore-bot -f` when systemd is active on Linux, and falls back to a real-time tail of `config/meshbot.log` on Windows.
+- **Troubleshooting Logs**: Streams/tails the logs. Invokes `journalctl -u meshhub -f` when systemd is active on Linux, and falls back to a real-time tail of `config/meshhub.log` on Windows.
   ```bash
-  meshbot logs
+  meshhub logs
   ```
+*(Note: `meshbot` remains available as a backward-compatible alias for all CLI commands).*
 
 ---
 

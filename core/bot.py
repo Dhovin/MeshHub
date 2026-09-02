@@ -77,7 +77,7 @@ class MeshHub:
                 pass
 
         log_dir = os.path.dirname(self.config_path)
-        log_file = os.path.join(log_dir, "meshbot.log")
+        log_file = os.path.join(log_dir, "meshhub.log")
         
         root = logging.getLogger()
         root.setLevel(logging.INFO)
@@ -114,7 +114,7 @@ class MeshHub:
         self.shutdown_event = asyncio.Event()
 
         # Write PID file
-        pid_file = os.path.join(os.path.dirname(self.config_path), "meshbot.pid")
+        pid_file = os.path.join(os.path.dirname(self.config_path), "meshhub.pid")
         try:
             with open(pid_file, 'w') as f:
                 f.write(str(os.getpid()))
@@ -262,12 +262,14 @@ class MeshHub:
         await self.connection_manager.disconnect()
 
         # Remove PID lockfile
-        pid_file = os.path.join(os.path.dirname(self.config_path), "meshbot.pid")
-        if os.path.exists(pid_file):
-            try:
-                os.remove(pid_file)
-            except Exception as e:
-                logger.warning(f"Could not remove PID file '{pid_file}': {e}")
+        pid_file = os.path.join(os.path.dirname(self.config_path), "meshhub.pid")
+        legacy_pid_file = os.path.join(os.path.dirname(self.config_path), "meshbot.pid")
+        for pf in (pid_file, legacy_pid_file):
+            if os.path.exists(pf):
+                try:
+                    os.remove(pf)
+                except Exception as e:
+                    logger.warning(f"Could not remove PID file '{pf}': {e}")
 
         logger.info("Graceful shutdown sequence complete.")
 

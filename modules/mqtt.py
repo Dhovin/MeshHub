@@ -190,7 +190,7 @@ def create_auth_token_internal(payload: AuthTokenPayload, private_key_hex: str, 
 
 
 # ==============================================================================
-# MeshCore-Bot Packet Capture Module
+# MeshHub Packet Capture Module
 # ==============================================================================
 
 class Mqtt:
@@ -1064,8 +1064,8 @@ class Mqtt:
             "model": state.get("model", "unknown"),
             "battery": state.get("battery") if state.get("battery") is not None else 100,
             "neighbors": state.get("neighborCount", 0),
-            "client": "meshcore-bot",
-            "client_version": "meshcore-bot",
+            "client": "meshhub",
+            "client_version": "meshhub",
             "radio": radio_val,
             "sf": state.get("radio_sf"),
             "bw": state.get("radio_bw"),
@@ -1107,7 +1107,7 @@ class Mqtt:
         
         claims = {
             "aud": audience,
-            "client": "MeshCore-Bot/packet-capture-module"
+            "client": "MeshHub/packet-capture-module"
         }
         
         payload = AuthTokenPayload(

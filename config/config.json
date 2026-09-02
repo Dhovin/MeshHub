@@ -45,7 +45,7 @@
     },
     "template": {
       "enabled": true,
-      "messagePrefix": "[MeshBot]",
+      "messagePrefix": "[MeshHub]",
       "logChannel": 0
     },
     "weather_bot": {

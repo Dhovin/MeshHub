@@ -1,11 +1,11 @@
-# MeshCore-bot Rebuild Specification
+# MeshHub Rebuild Specification
 
-This document provides a complete, self-contained, and positively framed prompt that provides all the context, requirements, and architectural details needed to rebuild the **MeshCore-bot** application from scratch.
+This document provides a complete, self-contained, and positively framed prompt that provides all the context, requirements, and architectural details needed to rebuild the **MeshHub** application from scratch.
 
 ---
 
 ```markdown
-You are a senior systems engineer building a modular, lightweight Python-based central hub daemon called **MeshCore-bot** from scratch. This application manages connection routing, timezone-aware scheduling, IPC commands, and event-driven automation for LoRa mesh hardware nodes.
+You are a senior systems engineer building a modular, lightweight Python-based central hub daemon called **MeshHub** from scratch. This application manages connection routing, timezone-aware scheduling, IPC commands, and event-driven automation for LoRa mesh hardware nodes.
 
 Implement the application purely in Python 3.10+ using vanilla CSS for styling, and ensure all library dependencies are managed via a Python virtual environment.
 
@@ -19,22 +19,23 @@ Ensure the installer and update scripts configure the following package dependen
 - `meshcore-cli`: Direct hardware command utilities.
 - `paho-mqtt`: For subscribing to MQTT message brokers.
 - `pynacl`: For cryptographic signature validation.
+- `requests`: For HTTP/HTTPS requests (weather and external APIs).
 
 ---
 
 ### 2. File & Directory Architecture
 Create the following layout:
-- `config/`: Configuration files (`config.json`, `schema.json`), database file (`contacts.json`), and process state trackers (`meshbot.pid`).
+- `config/`: Configuration files (`config.json`, `schema.json`), database file (`contacts.json`), and process state trackers (`meshhub.pid`).
 - `core/`: Hub daemon components:
-  - `bot.py`: Daemon coordinator and bootstrap.
+  - `bot.py`: Daemon coordinator and bootstrap (`MeshHub` class).
   - `connection_manager.py`: SDK connection manager, persistent database, and command executor.
   - `event_bus.py`: Thread-safe async event broker.
   - `state_cache.py`: Local thread-safe device telemetry snapshot memory.
   - `scheduler.py`: Timezone-aware cron tick scheduler.
   - `module_manager.py`: Dynamic module loader and execution sandbox.
   - `validator.py`: Configuration schema validator.
-- `bin/`: CLI script entry point (`meshbot`).
-- `modules/`: User modules (`template.py`, `weather_bot.py`, `autoresponce.py`).
+- `bin/`: CLI script entry point (`meshhub`, with backward-compatible `meshbot`).
+- `modules/`: User modules (`template.py`, `weather_bot.py`, `autoresponce.py`, `mqtt.py`, `net_bot.py`).
 - `tests/`: Framework and module unit test suite.
 - `scripts/`: Development pre-push validator hook (`pre_push.py`).
 - Root-level scripts: `install.sh`, `uninstall.sh`, `setup-dev.sh`.
@@ -42,7 +43,7 @@ Create the following layout:
 ---
 
 ### 3. Core Coordinator & IPC Daemon (`core/bot.py`)
-- **Bootstrap & Validation**: Load `config/config.json` on startup, validate it against `config/schema.json`, and configure logging to output to both stdout and a file at `config/meshbot.log`.
+- **Bootstrap & Validation**: Load `config/config.json` on startup, validate it against `config/schema.json`, and configure logging to output to both stdout and a file at `config/meshhub.log`.
 - **Automatic Timezone Resolution**: During boot, query `https://ipapi.co/timezone/` to auto-detect the local timezone of the host. If offline, fall back to the host system clock timezone, and default to UTC if unresolved. Store this as `self.timezone`.
 - **Local IPC TCP Server**: Bind a TCP socket server to `127.0.0.1` on the port specified by `ipcPort` in config (default `5002`). Receive JSON-formatted command lists (e.g. `{"command": ["advert"]}`), execute them natively, and return the JSON-serialized outcome to the client. Safely shut down the socket server during daemon termination.
 
@@ -79,17 +80,17 @@ Create the following layout:
 
 ---
 
-### 7. CLI Client Interface (`bin/meshbot`)
+### 7. CLI Client Interface (`bin/meshhub` and `bin/meshbot`)
 - **IPC Communication**: Interact with the daemon exclusively via the TCP socket server.
-- **Daemon Process Status & Auto-Start**: Read `config/meshbot.pid` to find the process ID. Check if it is active. Ensure the process check handles Unix permission errors (`errno.EPERM`) so that when the daemon runs as `root` (via systemd) and the CLI runs as an unprivileged user, it correctly identifies that it is running. If stopped, start the daemon process in the background before sending IPC payloads.
+- **Daemon Process Status & Auto-Start**: Read `config/meshhub.pid` (or `meshbot.pid`) to find the process ID. Check if it is active. Ensure the process check handles Unix permission errors (`errno.EPERM`) so that when the daemon runs as `root` (via systemd) and the CLI runs as an unprivileged user, it correctly identifies that it is running. If stopped, start the daemon process in the background before sending IPC payloads.
 - **Output Renders**: Format `contacts` command outputs into a cleanly aligned terminal text table. Display the `Public Key` column only when the `-pub`/`--pub` flag is active. Ensure stdout/stderr streams are reconfigured to UTF-8 to display emojis safely on Windows consoles.
-- **Config Wizard (`meshbot config`)**: Run a terminal configuration wizard. Present options for Serial/BLE/TCP connection modes, core properties, and module-specific fields. Automatically load schemas from loaded modules to dynamically prompt and edit module settings.
-- **Update Command (`meshbot update`)**: Perform a self-update. Stash local git changes, pull latest code, run pip upgrades for all dependencies, and trigger a restart of the daemon service.
+- **Config Wizard (`meshhub config`)**: Run a terminal configuration wizard. Present options for Serial/BLE/TCP connection modes, core properties, and module-specific fields. Automatically load schemas from loaded modules to dynamically prompt and edit module settings.
+- **Update Command (`meshhub update`)**: Perform a self-update. Stash local git changes, pull latest code, run pip upgrades for all dependencies, and trigger a restart of the daemon service.
 
 ---
 
 ### 8. System Scripts & Pipelines
-- **`install.sh`**: A shell installer. Installs system requirements, creates a local Python virtual environment (`venv`), upgrades pip packaging tools, installs all framework libraries, registers a wrapper script at `/usr/local/bin/meshbot` routing execution calls to the virtual environment Python, and registers/starts a systemd daemon service.
+- **`install.sh`**: A shell installer. Installs system requirements, creates a local Python virtual environment (`venv`), upgrades pip packaging tools, installs all framework libraries, registers a wrapper script at `/usr/local/bin/meshhub` (and symlink `/usr/local/bin/meshbot`), and registers/starts a systemd daemon service (`meshhub.service`).
 - **`setup-dev.sh`**: Git pre-push hook configuration. Registers a pre-push script calling `scripts/pre_push.py` which runs configuration validation and unit tests prior to allowing Git push events. Keep the test files inside `tests/` untracked by Git using `.gitignore` so they remain local to developers.
 
 ---

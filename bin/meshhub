@@ -1003,8 +1003,10 @@ def run_update():
     # 2. Update dependencies
     print("\n[Update] Updating Python dependencies...")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
-        res = subprocess.run([sys.executable, "-m", "pip", "install", "pyserial", "bleak", "meshcore", "meshcore-cli", "paho-mqtt", "pynacl", "aiohttp"])
+        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel", "cffi"])
+        env = os.environ.copy()
+        env["SODIUM_INSTALL"] = "system"
+        res = subprocess.run([sys.executable, "-m", "pip", "install", "pyserial", "bleak", "meshcore", "meshcore-cli", "paho-mqtt", "pynacl", "requests", "aiohttp"], env=env)
         if res.returncode == 0:
             print("[Update] Python dependencies updated successfully.")
         else:

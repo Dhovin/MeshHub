@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # setup-dev.sh: Initializes local Git, sets remote origin, and registers pre-push hook
 
-echo "Initializing developer environment for MeshCore-bot..."
+echo "Initializing developer environment for MeshHub..."
 
 # Initialize git repository if not already done
 if [ ! -d ".git" ]; then

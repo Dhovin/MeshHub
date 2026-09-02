@@ -1,46 +1,48 @@
 #!/usr/bin/env bash
-# uninstall.sh: Linux Uninstaller for MeshCore-bot Central Hub
+# uninstall.sh: Linux Uninstaller for MeshHub Central Hub
 
 set -e # Exit immediately on error
 
 echo "=================================================="
-echo "Starting MeshCore-bot Linux Uninstallation Script"
+echo "Starting MeshHub Linux Uninstallation Script"
 echo "=================================================="
 
 # 1. Stop and disable systemd service
-for svc in meshhub.service meshcore-bot.service; do
-  if systemctl is-active --quiet "$svc" 2>/dev/null; then
-    echo "[Uninstall] Stopping $svc..."
-    sudo systemctl stop "$svc" || true
+for SVC in "meshhub.service" "meshcore-bot.service"; do
+  if systemctl is-active --quiet "$SVC" 2>/dev/null; then
+    echo "[Uninstall] Stopping $SVC..."
+    sudo systemctl stop "$SVC" || true
   fi
-  if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-    echo "[Uninstall] Disabling $svc..."
-    sudo systemctl disable "$svc" || true
+  if systemctl is-enabled --quiet "$SVC" 2>/dev/null; then
+    echo "[Uninstall] Disabling $SVC..."
+    sudo systemctl disable "$SVC" || true
   fi
 done
 
 # 2. Remove systemd service files
-for sfile in /etc/systemd/system/meshhub.service /etc/systemd/system/meshcore-bot.service; do
-  if [ -f "$sfile" ]; then
-    echo "[Uninstall] Removing systemd service unit file $sfile..."
-    sudo rm -f "$sfile"
+for SVC_FILE in "/etc/systemd/system/meshhub.service" "/etc/systemd/system/meshcore-bot.service"; do
+  if [ -f "$SVC_FILE" ]; then
+    echo "[Uninstall] Removing systemd service unit file: $SVC_FILE..."
+    sudo rm -f "$SVC_FILE"
   fi
 done
 sudo systemctl daemon-reload || true
 
-# 3. Remove global wrappers
-for w in /usr/local/bin/meshhub /usr/local/bin/meshbot; do
-  if [ -f "$w" ] || [ -L "$w" ]; then
-    echo "[Uninstall] Removing global CLI wrapper runner $w..."
-    sudo rm -f "$w"
+# 3. Remove global CLI wrappers
+for WRAPPER in "/usr/local/bin/meshhub" "/usr/local/bin/meshbot"; do
+  if [ -f "$WRAPPER" ] || [ -L "$WRAPPER" ]; then
+    echo "[Uninstall] Removing global CLI wrapper: $WRAPPER..."
+    sudo rm -f "$WRAPPER"
   fi
 done
 
 # 4. Remove project virtual environment
 # Detect repository directory
-if [ -f "bin/meshbot" ] && [ -d "core" ]; then
+if ([ -f "bin/meshhub" ] || [ -f "bin/meshbot" ]) && [ -d "core" ]; then
   REPO_DIR=$(pwd)
-elif [ -d "${HOME}/Meshcore-bot" ] && [ -f "${HOME}/Meshcore-bot/bin/meshbot" ]; then
+elif [ -d "${HOME}/MeshHub" ] && ([ -f "${HOME}/MeshHub/bin/meshhub" ] || [ -f "${HOME}/MeshHub/bin/meshbot" ]); then
+  REPO_DIR="${HOME}/MeshHub"
+elif [ -d "${HOME}/Meshcore-bot" ] && ([ -f "${HOME}/Meshcore-bot/bin/meshhub" ] || [ -f "${HOME}/Meshcore-bot/bin/meshbot" ]); then
   REPO_DIR="${HOME}/Meshcore-bot"
 else
   REPO_DIR=""
@@ -56,11 +58,12 @@ fi
 
 # 5. Clean up process lockfiles
 if [ -n "$REPO_DIR" ]; then
-  PID_FILE="${REPO_DIR}/config/meshbot.pid"
-  if [ -f "$PID_FILE" ]; then
-    echo "[Uninstall] Cleaning process lockfiles..."
-    rm -f "$PID_FILE"
-  fi
+  for PF in "${REPO_DIR}/config/meshhub.pid" "${REPO_DIR}/config/meshbot.pid"; do
+    if [ -f "$PF" ]; then
+      echo "[Uninstall] Cleaning process lockfile: $PF..."
+      rm -f "$PF"
+    fi
+  done
 fi
 
 # 6. Prompt to clean up configurations
@@ -78,7 +81,7 @@ if [ -n "$REPO_DIR" ]; then
 fi
 
 # 7. Optionally remove repo directory itself
-if [ -n "$REPO_DIR" ] && [ "$REPO_DIR" = "${HOME}/Meshcore-bot" ]; then
+if [ -n "$REPO_DIR" ] && ([ "$REPO_DIR" = "${HOME}/MeshHub" ] || [ "$REPO_DIR" = "${HOME}/Meshcore-bot" ]); then
   echo "--------------------------------------------------"
   read -p "Do you want to completely remove the repository directory ${REPO_DIR}? [y/N]: " -n 1 -r
   echo
@@ -90,5 +93,5 @@ if [ -n "$REPO_DIR" ] && [ "$REPO_DIR" = "${HOME}/Meshcore-bot" ]; then
 fi
 
 echo "=================================================="
-echo "MeshCore-bot has been successfully uninstalled."
+echo "MeshHub has been successfully uninstalled."
 echo "=================================================="

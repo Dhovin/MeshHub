@@ -1,12 +1,12 @@
-# MeshCore-bot: Module Development Guide
+# MeshHub: Module Development Guide
 
-This guide provides a step-by-step walkthrough on how to develop custom modules (plugins) for the **MeshCore-bot** Central Hub and integrate them into the main daemon.
+This guide provides a step-by-step walkthrough on how to develop custom modules (plugins) for the **MeshHub** Central Hub and integrate them into the main daemon.
 
 ---
 
 ## 1. Overview of the Module System
 
-MeshCore-bot uses a dynamic, event-driven, and sandboxed plugin system. At startup, the bot:
+MeshHub uses a dynamic, event-driven, and sandboxed plugin system. At startup, the bot:
 1. Resolves module paths and checks for directory traversal safety.
 2. Dynamically loads modules from the `/modules` folder using Python's `importlib` utility.
 3. Instantiates the module class and validates that it implements the required lifecycle hooks.
@@ -163,7 +163,7 @@ Add a configuration block matching your module's `name` attribute under the `"mo
   "modules": {
     "template": {
       "enabled": true,
-      "messagePrefix": "[MeshBot]",
+      "messagePrefix": "[MeshHub]",
       "logChannel": 0
     },
     "battery_monitor": {

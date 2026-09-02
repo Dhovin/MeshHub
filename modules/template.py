@@ -80,7 +80,7 @@ class Template:
         
         # Example of responding using api.send if prefix matches or ping
         if text.strip().lower() == "ping":
-            prefix = self.config.get("messagePrefix", "[MeshBot]")
+            prefix = self.config.get("messagePrefix", "[MeshHub]")
             reply = f"{prefix} pong"
             logger.info(f"[{self.name}] Ping received. Replying with: {reply}")
             
