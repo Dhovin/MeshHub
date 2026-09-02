@@ -1,0 +1,7 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Enforce Unix LF line endings for shell scripts and bin executables
+*.sh text eol=lf
+bin/* text eol=lf
+*.py text eol=lf
