@@ -18,6 +18,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+os.chdir(project_root)
 
 from core.bot import MeshHub, SafeStreamWrapper
 sys.stdout = SafeStreamWrapper(sys.stdout)
@@ -1150,7 +1151,7 @@ def run_cli_cmd(cmds):
         return
         
     config_path = "config/config.json"
-    pid_path = "config/MeshHub.pid"
+    pid_path = get_pid_path()
     
     # Normalize command name if it uses a dash shortcut (e.g. -i -> i, -lc -> lc)
     if cmds:
@@ -1269,26 +1270,9 @@ def run_cli_cmd(cmds):
         print_cli_options()
         return
 
-    # 1. Check if daemon is running
-    running = False
-    if os.path.exists(pid_path):
-        try:
-            with open(pid_path, 'r') as f:
-                pid = int(f.read().strip())
-            running = is_process_running(pid)
-        except Exception:
-            pass
-            
-    if not running:
-        print("Daemon is not running. Starting MeshHub daemon in the background...")
-        if not start_daemon_process():
-            print("Error: Could not start the daemon process.")
-            return
-
-    # 2. Connect/poll daemon IPC server
     import socket
     import time
-    
+
     ipc_port = 5002
     if os.path.exists(config_path):
         try:
@@ -1298,26 +1282,67 @@ def run_cli_cmd(cmds):
         except Exception:
             pass
 
+    # 1. Check if daemon IPC server is already online and reachable
     connected = False
-    start_time = time.time()
-    timeout = 10.0 # wait up to 10 seconds for the daemon to start and initialize
-    
     s = None
-    while time.time() - start_time < timeout:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2.0)
-            s.connect(('127.0.0.1', ipc_port))
-            connected = True
-            break
-        except Exception:
-            if s:
-                s.close()
-            time.sleep(0.25)
-            
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.connect(('127.0.0.1', ipc_port))
+        connected = True
+    except Exception:
+        if s:
+            s.close()
+            s = None
+
+    # 2. If not reachable, check if process/service is running or start it
     if not connected:
-        print(f"Error: Could not connect to daemon IPC server on port {ipc_port} after {timeout} seconds.")
-        print("Please check the logs in config/MeshHub.log for connection or configuration errors.")
+        svc = get_systemd_service_name()
+        svc_active = False
+        if svc:
+            import subprocess
+            try:
+                chk = subprocess.run(["systemctl", "is-active", svc], capture_output=True, text=True)
+                if chk.stdout.strip() == "active":
+                    svc_active = True
+            except Exception:
+                pass
+
+        pid_running = False
+        if os.path.exists(pid_path):
+            try:
+                with open(pid_path, 'r') as f:
+                    pid = int(f.read().strip())
+                pid_running = is_process_running(pid)
+            except Exception:
+                pass
+
+        if not svc_active and not pid_running:
+            print("Daemon is not running. Starting MeshHub daemon in the background...")
+            if not start_daemon_process():
+                print("Error: Could not start the daemon process.")
+                return
+
+        # Poll until daemon IPC server is ready
+        start_time = time.time()
+        timeout = 10.0
+        while time.time() - start_time < timeout:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.0)
+                s.connect(('127.0.0.1', ipc_port))
+                connected = True
+                break
+            except Exception:
+                if s:
+                    s.close()
+                    s = None
+                time.sleep(0.25)
+
+    if not connected:
+        log_file = get_log_path()
+        print(f"Error: Could not connect to daemon IPC server on port {ipc_port}.")
+        print(f"Please check the logs in {log_file} for connection or configuration errors.")
         return
 
     try:

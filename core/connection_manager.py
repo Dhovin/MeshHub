@@ -560,11 +560,18 @@ class ConnectionManager:
                     if res.type == EventType.ERROR:
                         return {"error": f"Error querying repeat: {res}"}
                     return {"repeat": res.payload.get("repeat")}
-                elif param == "path_hash_mode":
+                elif param in ("path_hash_mode", "path.hash.mode", "path.hash", "path_hash"):
                     res = await self.mc.commands.send_device_query()
                     if res.type == EventType.ERROR:
                         return {"error": f"Error querying path_hash_mode: {res}"}
                     return {"path_hash_mode": res.payload.get("path_hash_mode")}
+                elif param in ("path.hash.size", "path_hash_size"):
+                    res = await self.mc.commands.send_device_query()
+                    if res.type == EventType.ERROR:
+                        return {"error": f"Error querying path_hash_mode: {res}"}
+                    mode = res.payload.get("path_hash_mode")
+                    size = (mode + 1) if mode is not None else None
+                    return {"path_hash_size": size, "path_hash_mode": mode}
                 elif param == "bat":
                     res = await self.mc.commands.get_bat()
                     if res.type == EventType.ERROR:
@@ -669,8 +676,24 @@ class ConnectionManager:
                     if res.type == EventType.ERROR:
                         return {"error": f"Failed to set radio config: {res}"}
                     return res.payload
-                elif setting == "path_hash_mode":
-                    res = await self.mc.commands.set_path_hash_mode(int(value))
+                elif setting in ("path_hash_mode", "path.hash.mode", "path.hash", "path_hash"):
+                    try:
+                        mode_val = int(value)
+                    except ValueError:
+                        return {"error": "path_hash_mode must be an integer (0, 1, or 2)."}
+                    res = await self.mc.commands.set_path_hash_mode(mode_val)
+                    if res.type == EventType.ERROR:
+                        return {"error": f"Failed to set path_hash_mode: {res}"}
+                    return res.payload
+                elif setting in ("path.hash.size", "path_hash_size"):
+                    try:
+                        size_val = int(value)
+                        if size_val not in (1, 2, 3):
+                            return {"error": "path.hash.size must be 1, 2, or 3 bytes (corresponding to mode 0, 1, or 2)."}
+                        mode_val = size_val - 1
+                    except ValueError:
+                        return {"error": "path.hash.size must be an integer (1, 2, or 3)."}
+                    res = await self.mc.commands.set_path_hash_mode(mode_val)
                     if res.type == EventType.ERROR:
                         return {"error": f"Failed to set path_hash_mode: {res}"}
                     return res.payload

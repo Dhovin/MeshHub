@@ -283,6 +283,16 @@ class TestConnectionManagerCommands(unittest.TestCase):
             
             res = loop.run_until_complete(self.cm.execute("get private_key"))
             self.assertEqual(res["private_key"], 32 * "03")
+
+            res = loop.run_until_complete(self.cm.execute("get path_hash_mode"))
+            self.assertEqual(res["path_hash_mode"], 1)
+
+            res = loop.run_until_complete(self.cm.execute("get path.hash"))
+            self.assertEqual(res["path_hash_mode"], 1)
+
+            res = loop.run_until_complete(self.cm.execute("get path.hash.size"))
+            self.assertEqual(res["path_hash_size"], 2)
+            self.assertEqual(res["path_hash_mode"], 1)
         finally:
             loop.close()
 
@@ -315,6 +325,14 @@ class TestConnectionManagerCommands(unittest.TestCase):
             
             res = loop.run_until_complete(self.cm.execute("set path_hash_mode 2"))
             self.assertEqual(res, {"path_hash_mode": 2})
+
+            res = loop.run_until_complete(self.cm.execute("set path.hash 1"))
+            self.assertEqual(res, {"path_hash_mode": 2})
+            self.cm.mc.commands.set_path_hash_mode.assert_called_with(1)
+
+            res = loop.run_until_complete(self.cm.execute("set path.hash.size 3"))
+            self.assertEqual(res, {"path_hash_mode": 2})
+            self.cm.mc.commands.set_path_hash_mode.assert_called_with(2)
             
             res = loop.run_until_complete(self.cm.execute("set autoadd_config 1"))
             self.assertEqual(res, {"autoadd_config": 1})
