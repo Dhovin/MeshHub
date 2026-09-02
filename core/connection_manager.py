@@ -27,6 +27,7 @@ class ConnectionManager:
             self.bot.config.get("core", {}).get("rateLimiting", {}).get("txRateLimitSeconds", 1.0)
             if hasattr(self.bot, "config") and self.bot.config else 1.0
         )
+        self._save_contacts_task = None
 
     async def connect(self):
         """
@@ -123,6 +124,9 @@ class ConnectionManager:
 
     async def disconnect(self):
         """Disconnect and release the node serial/BLE interface."""
+        if hasattr(self, '_save_contacts_task') and self._save_contacts_task and not self._save_contacts_task.done():
+            self._save_contacts_task.cancel()
+            self._save_contacts()
         if self.mc:
             logger.info("Closing connection to hardware node...")
             try:
@@ -1292,21 +1296,34 @@ class ConnectionManager:
         self.mc.subscribe(EventType.SELF_INFO, self._on_self_info)
 
     async def _run_handshake(self):
-        # Establish background contact loading
-        await self.mc.ensure_contacts()
-        self._load_contacts()
-        self._save_contacts()
-        await self.mc.start_auto_message_fetching()
-
         logger.info("Executing connection handshake device query...")
-        res = await self.mc.commands.send_device_query()
-        if res.type == EventType.ERROR:
-            raise RuntimeError(f"Handshake device query failed: {res}")
+        res = None
+        for attempt in range(2):
+            try:
+                res = await self.mc.commands.send_device_query()
+                if res and res.type != EventType.ERROR:
+                    break
+                if attempt == 0:
+                    logger.warning(f"Device query attempt 1 returned {res}. Retrying in 1s...")
+                    await asyncio.sleep(1.0)
+            except Exception as e:
+                logger.warning(f"Device query attempt {attempt+1} exception: {e}")
+                if attempt == 0:
+                    await asyncio.sleep(1.0)
 
-        self.deviceInfo = res.payload
+        if not res or res.type == EventType.ERROR:
+            # Check if self_info was already populated (e.g. from connect / send_appstart)
+            if hasattr(self.mc, 'self_info') and self.mc.self_info:
+                logger.warning(f"Handshake device query did not receive response ({res}), falling back to node self_info.")
+                self.deviceInfo = self.mc.self_info
+            else:
+                raise RuntimeError(f"Handshake device query failed: {res}")
+        else:
+            self.deviceInfo = res.payload
+
         self.isConnected = True
 
-        # Fetch node self_info config (appstart)
+        # Fetch node self_info config (appstart) if needed
         logger.info("Requesting node self info configuration...")
         try:
             self_info_res = await self.mc.commands.send_appstart()
@@ -1317,12 +1334,14 @@ class ConnectionManager:
 
         # Update cache
         self.bot.state_cache.update("connectionStatus", "connected")
-        self.bot.state_cache.update_from_telemetry(res.payload)
+        if self.deviceInfo:
+            self.bot.state_cache.update_from_telemetry(self.deviceInfo)
         if self.mc.self_info:
             self.bot.state_cache.update_from_telemetry(self.mc.self_info)
 
-        logger.info(f"Handshake complete. Connected to node: {self.mc.self_info.get('name', 'Unknown')}")
-        self.bot.event_bus.publish("connect", res.payload)
+        node_name = self.mc.self_info.get('name') if self.mc.self_info else (self.deviceInfo.get('name') if self.deviceInfo else 'Unknown')
+        logger.info(f"Handshake complete. Connected to node: {node_name}")
+        self.bot.event_bus.publish("connect", self.deviceInfo or {})
 
         # Trigger clock sync immediately
         await self.sync_time()
@@ -1371,6 +1390,23 @@ class ConnectionManager:
 
         # Trigger telemetry sync immediately on boot
         await self.sync_telemetry()
+
+        # Load cached contacts into memory
+        self._load_contacts()
+
+        # Start contact sync and auto message fetching in background
+        async def _background_sync():
+            try:
+                await self.mc.ensure_contacts()
+                self._save_contacts()
+            except Exception as e:
+                logger.warning(f"Background contact sync encountered error: {e}")
+            try:
+                await self.mc.start_auto_message_fetching()
+            except Exception as e:
+                logger.warning(f"Error starting auto message fetching: {e}")
+
+        asyncio.create_task(_background_sync())
 
     def _on_private_message(self, event):
         try:
@@ -1548,7 +1584,7 @@ class ConnectionManager:
                     if "adv_lon" in payload and payload["adv_lon"]:
                         c["adv_lon"] = payload["adv_lon"]
                     c["lastmod"] = payload.get("lastmod") or int(time.time())
-                self._save_contacts()
+                self._schedule_save_contacts()
         except Exception as e:
             logger.error(f"Error handling advertisement event: {e}", exc_info=True)
 
@@ -1567,13 +1603,13 @@ class ConnectionManager:
                     self.mc._contacts = {}
                 self.mc._contacts[pubkey] = payload
             self.bot.event_bus.publish("new_contact", payload)
-            self._save_contacts()
+            self._schedule_save_contacts()
         except Exception as e:
             logger.error(f"Error handling new contact event: {e}", exc_info=True)
 
     def _on_contacts_update(self, event):
         try:
-            self._save_contacts()
+            self._schedule_save_contacts()
         except Exception as e:
             logger.error(f"Error handling contacts update event: {e}", exc_info=True)
 
@@ -1645,6 +1681,26 @@ class ConnectionManager:
             logger.info(f"Loaded {loaded_count} new/updated persistent contacts into memory.")
         except Exception as e:
             logger.error(f"Error loading persistent contacts: {e}", exc_info=True)
+
+    def _schedule_save_contacts(self, delay: float = 1.0):
+        """Debounce contacts disk write to prevent heavy I/O freezes when syncing many contacts."""
+        if hasattr(self, '_save_contacts_task') and self._save_contacts_task and not self._save_contacts_task.done():
+            self._save_contacts_task.cancel()
+
+        async def _deferred_save():
+            try:
+                await asyncio.sleep(delay)
+                self._save_contacts()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error in deferred save contacts: {e}")
+
+        try:
+            loop = asyncio.get_running_loop()
+            self._save_contacts_task = loop.create_task(_deferred_save())
+        except RuntimeError:
+            self._save_contacts()
 
     def _save_contacts(self):
         """Save local contacts copy to config/contacts.json."""
