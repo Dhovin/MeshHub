@@ -49,6 +49,14 @@ if [ -n "$BOARD_MODEL" ]; then
     echo "  * Recommended: Connect companion radio to USB 2.0 port"
     echo "    or powered USB hub for optimal power stability."
     echo "--------------------------------------------------"
+  elif echo "$BOARD_MODEL" | grep -qi "raspberry pi"; then
+    echo "--------------------------------------------------"
+    echo "[Notice] Raspberry Pi hardware detected ($BOARD_MODEL):"
+    echo "  * Onboard Bluetooth Low Energy (BLE) is supported."
+    echo "  * USB serial connections (/dev/ttyUSB*, /dev/ttyACM*) are plug-and-play."
+    echo "  * If wiring companion radio to 40-pin GPIO UART (Pins 8 & 10):"
+    echo "    disable serial console via 'sudo raspi-config' (Interface Options -> Serial Port)."
+    echo "--------------------------------------------------"
   fi
 fi
 
