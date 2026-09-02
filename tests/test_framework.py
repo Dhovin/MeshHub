@@ -584,12 +584,13 @@ class TestEventMessageParsing(unittest.TestCase):
 
 class TestTimezoneResolution(unittest.TestCase):
     def test_configured_timezone(self):
-        from core.bot import MeshBot
+        from core.bot import MeshHub, MeshBot
         from unittest.mock import patch, MagicMock
         
-        with patch.object(MeshBot, 'load_and_validate_config'), \
-             patch.object(MeshBot, 'setup_logging'):
-            bot = MeshBot()
+        self.assertIs(MeshBot, MeshHub)
+        with patch.object(MeshHub, 'load_and_validate_config'), \
+             patch.object(MeshHub, 'setup_logging'):
+            bot = MeshHub()
             bot.config = {"core": {"timezone": "Europe/London"}}
             
             loop = asyncio.new_event_loop()
@@ -601,18 +602,18 @@ class TestTimezoneResolution(unittest.TestCase):
                 loop.close()
 
     def test_auto_timezone_resolution(self):
-        from core.bot import MeshBot
+        from core.bot import MeshHub
         from unittest.mock import patch, MagicMock
         
-        with patch.object(MeshBot, 'load_and_validate_config'), \
-             patch.object(MeshBot, 'setup_logging'), \
+        with patch.object(MeshHub, 'load_and_validate_config'), \
+             patch.object(MeshHub, 'setup_logging'), \
              patch('urllib.request.urlopen') as mock_urlopen:
             
             mock_resp = MagicMock()
             mock_resp.read.return_value = b"America/Chicago\n"
             mock_urlopen.return_value.__enter__.return_value = mock_resp
             
-            bot = MeshBot()
+            bot = MeshHub()
             bot.config = {"core": {"timezone": "auto"}}
             
             loop = asyncio.new_event_loop()

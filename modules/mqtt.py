@@ -956,7 +956,7 @@ class Mqtt:
                     logger.warning(f"[{self.name}] Let's Mesh broker requires a valid IATA regional code. Skipping broker {idx} ({server}).")
                     continue
                 
-                client_id = f"meshbot_{self.device_public_key or 'device'}"
+                client_id = f"meshhub_{self.device_public_key or 'device'}"
                 if idx > 1:
                     client_id += f"_{idx}"
                 transport = "websockets" if b_cfg.get("use_ws", False) else "tcp"

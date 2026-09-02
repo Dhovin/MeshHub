@@ -158,7 +158,7 @@ class MeshHub:
                     try:
                         req = urllib.request.Request(
                             "https://ipapi.co/timezone/",
-                            headers={"User-Agent": "MeshCore-bot/1.0"}
+                            headers={"User-Agent": "MeshHub/1.0"}
                         )
                         with urllib.request.urlopen(req, timeout=5) as response:
                             return response.read().decode('utf-8').strip()
@@ -230,7 +230,7 @@ class MeshHub:
         # Schedule periodic telemetry synchronization (every 5 minutes)
         self.scheduler.schedule("*/5 * * * *", self.connection_manager.sync_telemetry, name="core_telemetry_sync")
 
-        logger.info("MeshCore-bot started successfully and running modules.")
+        logger.info("MeshHub started successfully and running modules.")
         
         # Wait until shutdown event is set (by signal handler or connect failure)
         await self.shutdown_event.wait()

@@ -159,7 +159,7 @@ The pipeline performs the following tasks:
 
 Modules are loaded from `/modules` using dynamic imports. To create a custom module, create a python script that exports a class whose name is the TitleCase equivalent of the file name (e.g. class `Template` in `template.py` or class `Module` as a fallback).
 
-You can use [modules/template.py](file:///c:/Users/dhovi/Documents/GitHub/MeshCore-Bot/modules/template.py) as a reference blueprint.
+You can use [modules/template.py](modules/template.py) as a reference blueprint.
 
 ### Module Interface
 

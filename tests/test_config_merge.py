@@ -6,15 +6,16 @@ import importlib.util
 
 from importlib.machinery import SourceFileLoader
 
-# Load bin/meshbot dynamically as a module since it doesn't have a .py extension
+# Load bin/meshhub dynamically as a module since it doesn't have a .py extension
 script_dir = os.path.dirname(os.path.abspath(__file__))
-meshbot_path = os.path.abspath(os.path.join(script_dir, "../bin/meshbot"))
+meshhub_path = os.path.abspath(os.path.join(script_dir, "../bin/meshhub"))
 
-loader = SourceFileLoader("meshbot", meshbot_path)
-spec = importlib.util.spec_from_file_location("meshbot", meshbot_path, loader=loader)
-meshbot = importlib.util.module_from_spec(spec)
-sys.modules["meshbot"] = meshbot
-loader.exec_module(meshbot)
+loader = SourceFileLoader("meshhub", meshhub_path)
+spec = importlib.util.spec_from_file_location("meshhub", meshhub_path, loader=loader)
+meshhub = importlib.util.module_from_spec(spec)
+sys.modules["meshhub"] = meshhub
+loader.exec_module(meshhub)
+meshbot = meshhub
 
 class TestConfigMerge(unittest.TestCase):
     def test_recursive_dict_merge(self):
@@ -27,7 +28,7 @@ class TestConfigMerge(unittest.TestCase):
             "modules": {
                 "template": {
                     "enabled": False,
-                    "messagePrefix": "[MeshBot]"
+                    "messagePrefix": "[MeshHub]"
                 }
             }
         }
@@ -51,7 +52,7 @@ class TestConfigMerge(unittest.TestCase):
             "modules": {
                 "template": {
                     "enabled": True,
-                    "messagePrefix": "[MeshBot]"
+                    "messagePrefix": "[MeshHub]"
                 }
             }
         }
