@@ -116,7 +116,7 @@ else
     git pull
   else
     echo "[Install] Cloning MeshHub repository into ${INSTALL_DIR}..."
-    git clone https://github.com/Dhovin/Meshcore-bot.git "$INSTALL_DIR"
+    git clone https://github.com/Dhovin/MeshHub.git "$INSTALL_DIR"
     cd "$INSTALL_DIR"
   fi
   REPO_DIR=$(pwd)

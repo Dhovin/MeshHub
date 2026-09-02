@@ -89,12 +89,12 @@ python -m unittest discover -s tests -p "*.py"
 
 To automatically download the code, clone it into your home directory (`~/MeshHub`), set up the service, dependencies, virtual environment, and install the global `meshhub` (and `meshbot`) CLI commands with a single line:
 ```bash
-curl -sSL https://raw.githubusercontent.com/Dhovin/Meshcore-bot/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Dhovin/MeshHub/main/install.sh | bash
 ```
 
 To completely stop services, wipe configuration and databases, and clean up the system-wide installation wrappers:
 ```bash
-curl -sSL https://raw.githubusercontent.com/Dhovin/Meshcore-bot/main/uninstall.sh | bash
+curl -sSL https://raw.githubusercontent.com/Dhovin/MeshHub/main/uninstall.sh | bash
 ```
 
 #### Manual Installation

@@ -12,7 +12,7 @@ else
 fi
 
 # Set remote origin to Dhovin repository
-REMOTE_URL="https://github.com/Dhovin/Meshcore-bot.git"
+REMOTE_URL="https://github.com/Dhovin/MeshHub.git"
 
 if git remote | grep -q "^origin$"; then
   echo "Updating existing remote origin URL to: ${REMOTE_URL}"
