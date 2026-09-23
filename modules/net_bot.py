@@ -19,6 +19,7 @@ class NetBot:
                 "channel": {"type": "string"},
                 "day_of_week": {"type": "string"},
                 "time": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+                "duration": {"type": "number", "minimum": 0.1},
                 "keyword": {"type": "string"},
                 "state_file": {"type": "string"},
                 "timezone": {"type": "string"}
@@ -29,6 +30,7 @@ class NetBot:
         self.channel = "#net"
         self.day_of_week = "Tuesday"
         self.time = "19:00"
+        self.duration = 2.0
         self.keyword = "#checkin"
         self.state_file = "net_state.json"
         self.timezone = "UTC"
@@ -87,8 +89,21 @@ class NetBot:
             config["time"] = val
         elif "time" not in config:
             config["time"] = current_time
+
+        # 5. Duration (in hours)
+        current_duration = config.get("duration", 2)
+        val = input(f"Enter Net Duration in hours [current: {current_duration}]: ").strip()
+        if val:
+            try:
+                num = float(val)
+                config["duration"] = int(num) if num.is_integer() else num
+            except ValueError:
+                print("Invalid number, keeping current duration.")
+                config["duration"] = current_duration
+        elif "duration" not in config:
+            config["duration"] = current_duration
             
-        # 5. Keyword
+        # 6. Keyword
         current_keyword = config.get("keyword", "#checkin")
         val = input(f"Enter Keyword to check-in [current: {current_keyword}]: ").strip()
         if val:
@@ -96,7 +111,7 @@ class NetBot:
         elif "keyword" not in config:
             config["keyword"] = current_keyword
 
-        # 6. State file
+        # 7. State file
         current_state_file = config.get("state_file", "net_state.json")
         val = input(f"Enter State File Name [current: {current_state_file}]: ").strip()
         if val:
@@ -104,7 +119,7 @@ class NetBot:
         elif "state_file" not in config:
             config["state_file"] = current_state_file
 
-        # 7. Timezone
+        # 8. Timezone
         current_tz = config.get("timezone", "America/Chicago")
         val = input(f"Enter Timezone (e.g. America/Chicago, America/New_York, America/Los_Angeles) [current: {current_tz}]: ").strip()
         if val:
@@ -120,6 +135,10 @@ class NetBot:
         self.channel = config.get("channel", "#net")
         self.day_of_week = config.get("day_of_week", "Tuesday")
         self.time = config.get("time", "19:00")
+        try:
+            self.duration = float(config.get("duration", config.get("duration_hours", 2.0)))
+        except (ValueError, TypeError):
+            self.duration = 2.0
         self.keyword = config.get("keyword", "#checkin")
         self.state_file = config.get("state_file", "net_state.json")
         
@@ -170,9 +189,10 @@ class NetBot:
                 
                 now = datetime.now(ZoneInfo(self.timezone))
                 elapsed = (now - start_dt).total_seconds()
+                duration_seconds = self.duration * 3600
                 
-                if elapsed < 3600 and elapsed >= 0:
-                    remaining = 3600 - elapsed
+                if elapsed < duration_seconds and elapsed >= 0:
+                    remaining = duration_seconds - elapsed
                     logger.info(f"[{self.name}] Resuming active Net started at {self.net_start_time}. Remaining time: {remaining:.1f}s")
                     self.net_end_task = asyncio.create_task(self._wait_and_end_net(remaining))
                 else:
@@ -329,7 +349,7 @@ class NetBot:
         
         if self.net_end_task:
             self.net_end_task.cancel()
-        self.net_end_task = asyncio.create_task(self._wait_and_end_net(3600))
+        self.net_end_task = asyncio.create_task(self._wait_and_end_net(self.duration * 3600))
 
     async def _on_1pm_reminder(self):
         logger.info(f"[{self.name}] 1 PM reminder triggered.")

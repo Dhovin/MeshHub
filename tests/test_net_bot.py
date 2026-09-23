@@ -56,10 +56,17 @@ class TestNetBotModule(unittest.TestCase):
         self.assertEqual(self.module.channel, "#net")
         self.assertEqual(self.module.day_of_week, "Tuesday")
         self.assertEqual(self.module.time, "19:00")
+        self.assertEqual(self.module.duration, 2.0)
         self.assertEqual(self.module.keyword, "#checkin")
         self.assertEqual(self.module.timezone, "UTC")
         self.assertTrue(self.module.state_file_path.endswith("test_net_state.json"))
         self.api.declare_channels.assert_called_with("#net")
+
+    def test_init_custom_duration(self):
+        custom_config = dict(self.config)
+        custom_config["duration"] = 1.5
+        self.module.init(self.api, custom_config)
+        self.assertEqual(self.module.duration, 1.5)
 
     def test_cron_calculation_normal(self):
         # Tuesday 19:00 -> Net at 19:00 (dow=2), 1pm reminder at 13:00 (dow=2), 30m prior at 18:30 (dow=2)
@@ -205,18 +212,20 @@ class TestNetBotModule(unittest.TestCase):
             self.module.checkins = ["OldUser"]
             
             async def run_test():
-                await self.module._on_net_start()
-                
-                self.assertTrue(self.module.is_active)
-                self.assertIsNotNone(self.module.net_start_time)
-                # Checkins list should be cleared on start
-                self.assertEqual(self.module.checkins, [])
-                
-                # Check welcome message sent
-                self.conn_manager.execute.assert_called_with(["chan", "1", "Welcome to the weekly #net. Please respond with #checkin to checkin."])
-                
-                # End net task should be scheduled
-                self.assertIsNotNone(self.module.net_end_task)
+                with patch.object(self.module, "_wait_and_end_net") as mock_wait:
+                    await self.module._on_net_start()
+                    
+                    self.assertTrue(self.module.is_active)
+                    self.assertIsNotNone(self.module.net_start_time)
+                    # Checkins list should be cleared on start
+                    self.assertEqual(self.module.checkins, [])
+                    
+                    # Check welcome message sent
+                    self.conn_manager.execute.assert_called_with(["chan", "1", "Welcome to the weekly #net. Please respond with #checkin to checkin."])
+                    
+                    # End net task should be scheduled with duration * 3600 (2.0 * 3600 = 7200.0)
+                    self.assertIsNotNone(self.module.net_end_task)
+                    mock_wait.assert_called_with(7200.0)
             loop.run_until_complete(run_test())
         finally:
             loop.close()
@@ -291,8 +300,8 @@ class TestNetBotModule(unittest.TestCase):
             self.api.request_channel = AsyncMock(return_value=1)
             self.module.init(self.api, self.config)
             
-            # Setup active state started 2 hours ago (expired)
-            start_time = (datetime.now(ZoneInfo("UTC")) - timedelta(hours=2)).isoformat()
+            # Setup active state started 3 hours ago (expired since duration default is 2 hours)
+            start_time = (datetime.now(ZoneInfo("UTC")) - timedelta(hours=3)).isoformat()
             state_data = {
                 "is_active": True,
                 "net_start_time": start_time,
@@ -310,6 +319,40 @@ class TestNetBotModule(unittest.TestCase):
             self.conn_manager.execute.assert_called_with(["chan", "1", "Thank you for joining. 1 user checkedin today."])
         finally:
             loop.close()
+
+    def test_resume_net_custom_duration(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.api.request_channel = AsyncMock(return_value=1)
+            custom_config = dict(self.config)
+            custom_config["duration"] = 0.5  # 30 minutes
+            self.module.init(self.api, custom_config)
+            
+            # Started 40 minutes ago -> should expire (40m > 30m)
+            start_time = (datetime.now(ZoneInfo("UTC")) - timedelta(minutes=40)).isoformat()
+            state_data = {
+                "is_active": True,
+                "net_start_time": start_time,
+                "checkins": ["Alice"]
+            }
+            with open(self.test_state_file, 'w') as f:
+                json.dump(state_data, f)
+                
+            loop.run_until_complete(self.module.start())
+            
+            self.assertFalse(self.module.is_active)
+            self.assertEqual(self.module.checkins, [])
+        finally:
+            loop.close()
+
+    def test_run_config_duration(self):
+        inputs = ["y", "#net", "Tuesday", "19:00", "2.5", "#checkin", "net_state.json", "America/Chicago"]
+        with patch("builtins.input", side_effect=inputs):
+            res = self.module.run_config({})
+            self.assertEqual(res["duration"], 2.5)
+            self.assertEqual(res["channel"], "#net")
+            self.assertEqual(res["time"], "19:00")
 
 if __name__ == '__main__':
     unittest.main()
