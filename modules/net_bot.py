@@ -304,6 +304,10 @@ class NetBot:
         if channel is None:
             return
 
+        # Fast synchronous pattern check: only proceed if checkin keyword is present
+        if self.keyword.lower() not in text.lower():
+            return
+
         asyncio.create_task(self._handle_message_async(sender, text, channel))
 
     async def _handle_message_async(self, sender, text, channel):

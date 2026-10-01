@@ -125,11 +125,14 @@ class ModuleAPI:
             return 0
             
         # 2. Check if the channel already exists
+        clean_target = str(channel_name).strip().lower().lstrip("#")
         for ch in channels:
-            if ch and ch.get("channel_name") == channel_name:
-                idx = ch.get("channel_idx", 0)
-                self.declare_channels(idx)
-                return idx
+            if ch:
+                ch_name = str(ch.get("channel_name", "")).strip().lower().lstrip("#")
+                if ch_name == clean_target or ch.get("channel_name") == channel_name:
+                    idx = ch.get("channel_idx", 0)
+                    self.declare_channels(idx)
+                    return idx
                 
         # 3. Channel does not exist, find first empty channel slot
         empty_idx = None
@@ -173,6 +176,31 @@ class ModuleAPI:
 
     async def matches_channel(self, channel, target_channel_name):
         """Verify if the given channel index or name matches the target channel name."""
+        if target_channel_name is None:
+            return False
+
+        # Fast-path 1: If incoming channel is a string, compare normalized names directly
+        if isinstance(channel, str) and not channel.isdigit():
+            clean_target = str(target_channel_name).strip().lower().lstrip('#')
+            clean_channel = channel.strip().lower().lstrip('#')
+            return clean_channel == clean_target
+
+        # Fast-path 2: If we have cached channels on connection_manager.mc, match in-memory
+        if self.bot.connection_manager and self.bot.connection_manager.mc:
+            channels_cache = getattr(self.bot.connection_manager.mc, 'channels', None)
+            if channels_cache and isinstance(channels_cache, list):
+                clean_target = str(target_channel_name).strip().lower().lstrip('#')
+                for ch in channels_cache:
+                    if ch:
+                        ch_name = str(ch.get("channel_name", "")).strip().lower().lstrip('#')
+                        if ch_name == clean_target or ch.get("channel_name") == target_channel_name:
+                            idx = ch.get("channel_idx", 0)
+                            if isinstance(channel, int) and channel == idx:
+                                return True
+                            if isinstance(channel, str) and channel.isdigit() and int(channel) == idx:
+                                return True
+
+        # Fallback to request_channel
         idx = await self.request_channel(target_channel_name)
         if idx is None:
             return False
@@ -181,8 +209,8 @@ class ModuleAPI:
         if isinstance(channel, str):
             if channel.isdigit() and int(channel) == idx:
                 return True
-            clean_target = target_channel_name.lower().lstrip('#')
-            clean_channel = channel.lower().lstrip('#')
+            clean_target = str(target_channel_name).strip().lower().lstrip('#')
+            clean_channel = channel.strip().lower().lstrip('#')
             return clean_channel == clean_target
         return False
 

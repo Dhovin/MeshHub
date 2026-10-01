@@ -137,6 +137,15 @@ class TestNetBotModule(unittest.TestCase):
             self.module._on_message({"sender": "Alice", "text": "#checkin", "channel": None})
             mock_handler.assert_not_called()
 
+    def test_on_message_ignores_non_keyword_synchronously(self):
+        self.module.init(self.api, self.config)
+        self.module.is_active = True
+        
+        with patch.object(self.module, "_handle_message_async") as mock_handler:
+            # A test ping message on another channel without #checkin keyword
+            self.module._on_message({"sender": "Bob", "text": "test ping", "channel": 1})
+            mock_handler.assert_not_called()
+
     def test_handle_message_valid_checkin(self):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

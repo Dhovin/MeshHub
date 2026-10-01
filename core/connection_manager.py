@@ -16,6 +16,37 @@ try:
 except ImportError:
     BLE_AVAILABLE = False
 
+class AsyncReentrantLock:
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._owner = None
+        self._count = 0
+
+    async def acquire(self):
+        me = asyncio.current_task()
+        if self._owner == me:
+            self._count += 1
+            return
+        await self._lock.acquire()
+        self._owner = me
+        self._count = 1
+
+    async def release(self):
+        me = asyncio.current_task()
+        if self._owner != me:
+            raise RuntimeError("Cannot release un-acquired lock")
+        self._count -= 1
+        if self._count == 0:
+            self._owner = None
+            self._lock.release()
+
+    async def __aenter__(self):
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.release()
+
 class ConnectionManager:
     def __init__(self, bot):
         self.bot = bot
@@ -23,6 +54,7 @@ class ConnectionManager:
         self.isConnected = False
         self.connectionType = None
         self.deviceInfo = None
+        self._cmd_lock = AsyncReentrantLock()
         self.tx_limiter = BotTxRateLimiter(
             self.bot.config.get("core", {}).get("rateLimiting", {}).get("txRateLimitSeconds", 1.0)
             if hasattr(self.bot, "config") and self.bot.config else 1.0
@@ -153,6 +185,12 @@ class ConnectionManager:
         return contact
 
     async def execute(self, cmd_str):
+        if not hasattr(self, '_cmd_lock') or self._cmd_lock is None:
+            self._cmd_lock = AsyncReentrantLock()
+        async with self._cmd_lock:
+            return await self._execute_unlocked(cmd_str)
+
+    async def _execute_unlocked(self, cmd_str):
         """
         Execute command string natively on the client.
         Provides compatibility with string-based Module API commands.

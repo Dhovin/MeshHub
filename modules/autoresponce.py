@@ -148,6 +148,13 @@ class Autoresponce:
             if await self.api.matches_channel(channel, ch):
                 is_target_channel = True
                 target_idx = self.channel_indices.get(ch)
+                if target_idx is None:
+                    if isinstance(channel, int):
+                        target_idx = channel
+                    elif isinstance(channel, str) and channel.isdigit():
+                        target_idx = int(channel)
+                    if target_idx is not None:
+                        self.channel_indices[ch] = target_idx
                 break
 
         if not is_target_channel or target_idx is None:
