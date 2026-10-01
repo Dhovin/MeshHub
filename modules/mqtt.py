@@ -2041,6 +2041,7 @@ class Mqtt:
                             "data": packet_data["raw"]
                         }
                         client.publish(raw_topic, json.dumps(raw_payload), qos=0, retain=False)
+                        logger.info(f"📤 [{self.name}] Published raw packet to broker {broker_num} on topic: {raw_topic}")
             except Exception as e:
                 logger.error(f"[{self.name}] Failed to publish packet to broker {broker_num}: {e}")
 
