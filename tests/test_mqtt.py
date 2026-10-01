@@ -306,3 +306,45 @@ def test_format_packet_with_decoded_payload():
     assert "origin" in formatted
     assert "origin_id" in formatted
     assert formatted["type"] == "PACKET"
+
+
+@pytest.mark.asyncio
+async def test_rx_log_data_dispatches_packet_and_raw():
+    mqtt_module = Mqtt()
+    mqtt_module.init(MagicMock(), {
+        "enabled": True,
+        "send_raw": True,
+        "iata": "DFW"
+    })
+    mqtt_module.device_public_key = "0B313702B7F6CA3BE989091EC8124E3A5A334ACE2EAC8D4ECEA16006866C860E"
+    
+    mock_client = MagicMock()
+    mqtt_module.mqtt_clients = [{
+        "broker_num": 1,
+        "client": mock_client,
+        "config": {"server": "ntxmesh.dhovin.me"}
+    }]
+    mqtt_module.mqtt_connected = {1: True}
+
+    # Simulate an incoming RX_LOG_DATA event
+    log_data = {
+        "snr": 9.25,
+        "rssi": -65,
+        "payload": "0100ABCD1234",
+        "payload_length": 6
+    }
+    await mqtt_module._on_rx_log_data(log_data)
+
+    assert mqtt_module.packet_count == 1
+    # Check that client.publish was called for both packets and raw topics
+    assert mock_client.publish.call_count == 2
+    
+    topics = [call[0][0] for call in mock_client.publish.call_args_list]
+    assert "meshcore/DFW/0B313702B7F6CA3BE989091EC8124E3A5A334ACE2EAC8D4ECEA16006866C860E/packets" in topics
+    assert "meshcore/DFW/0B313702B7F6CA3BE989091EC8124E3A5A334ACE2EAC8D4ECEA16006866C860E/raw" in topics
+
+    # Now verify deduplication: an immediate raw_data event with identical hex should be skipped
+    mock_client.publish.reset_mock()
+    await mqtt_module._on_raw_data({"data": "0100ABCD1234"})
+    assert mock_client.publish.call_count == 0
+

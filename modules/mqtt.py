@@ -824,6 +824,8 @@ class Mqtt:
         
         self.rf_data_cache = {}
         self.recent_rf_packets = {}
+        self.raw_duplicate_window = 2.0
+        self.rf_data_timeout = 15.0
         self.packet_count = 0
         
         # Device details
@@ -1197,62 +1199,85 @@ class Mqtt:
                 return
             snr = data.get("snr")
             rssi = data.get("rssi")
-            raw_hex = data.get("payload") or data.get("raw_hex")
-            if raw_hex and len(raw_hex) >= 4:
-                prefix = raw_hex[:4].lower()
-                now = time.time()
-                self.rf_data_cache[prefix] = {
-                    "snr": snr,
-                    "rssi": rssi,
-                    "timestamp": now,
-                    "payload_length": len(raw_hex) // 2
-                }
-                
-                # Check for recent packet waiting for RF data
-                if prefix in self.recent_rf_packets:
-                    packet_info = self.recent_rf_packets.pop(prefix)
-                    if (now - packet_info["timestamp"]) < 10.0:
-                        rf_data = {"snr": snr, "rssi": rssi, "payload_length": len(raw_hex) // 2}
-                        formatted = self._format_packet_data(packet_info["raw_hex"], rf_data)
-                        self._output_packet(formatted)
+            raw_hex = None
+            if data.get("payload"):
+                raw_hex = data["payload"]
+            elif data.get("raw_hex"):
+                raw_hex = data["raw_hex"]
+                if len(raw_hex) >= 4:
+                    raw_hex = raw_hex[4:]  # Skip first 2 bytes (SNR and RSSI)
+
+            if not raw_hex:
+                return
+
+            if raw_hex.startswith("0x") or raw_hex.startswith("0X"):
+                raw_hex = raw_hex[2:]
+
+            raw_hex = raw_hex.upper()
+            packet_prefix = raw_hex[:32]
+            now = time.time()
+
+            rf_data = {
+                "snr": snr,
+                "rssi": rssi,
+                "timestamp": now,
+                "raw_hex": raw_hex,
+                "payload_length": data.get("payload_length", len(raw_hex) // 2)
+            }
+            self.rf_data_cache[packet_prefix] = rf_data
+
+            # Clean up old RF cache entries
+            self.rf_data_cache = {
+                k: v for k, v in self.rf_data_cache.items()
+                if now - v["timestamp"] < self.rf_data_timeout
+            }
+
+            # Deduplication: record in recent_rf_packets so subsequent RAW_DATA is skipped
+            self.recent_rf_packets[raw_hex] = now
+            self.recent_rf_packets = {
+                k: v for k, v in self.recent_rf_packets.items()
+                if now - v < self.raw_duplicate_window
+            }
+
+            # Directly format and publish the RF packet
+            formatted = self._format_packet_data(raw_hex, rf_data)
+            self._output_packet(formatted)
         except Exception as e:
-            logger.debug(f"[{self.name}] Error in _on_rx_log_data: {e}")
+            logger.error(f"[{self.name}] Error in _on_rx_log_data: {e}", exc_info=True)
 
     async def _on_raw_data(self, data):
         try:
             if not isinstance(data, dict):
                 return
-            raw_hex = data.get("data") or data.get("raw")
+            raw_hex = data.get("data") or data.get("raw_hex") or data.get("payload") or data.get("raw")
             if not raw_hex:
                 return
-                
-            prefix = raw_hex[:4].lower()
-            now = time.time()
-            rf_data = None
-            if prefix in self.rf_data_cache:
-                cached = self.rf_data_cache[prefix]
-                if (now - cached["timestamp"]) < 10.0:
-                    rf_data = cached
-                    
-            if rf_data:
-                formatted = self._format_packet_data(raw_hex, rf_data)
-                self._output_packet(formatted)
-            else:
-                self.recent_rf_packets[prefix] = {
-                    "raw_hex": raw_hex,
-                    "timestamp": now
-                }
-                # Fallback after short delay if no RF log arrived
-                asyncio.create_task(self._process_delayed_packet(prefix, raw_hex))
-        except Exception as e:
-            logger.debug(f"[{self.name}] Error in _on_raw_data: {e}")
 
-    async def _process_delayed_packet(self, prefix: str, raw_hex: str):
-        await asyncio.sleep(0.5)
-        if prefix in self.recent_rf_packets:
-            self.recent_rf_packets.pop(prefix, None)
-            formatted = self._format_packet_data(raw_hex, None)
+            if raw_hex.startswith("0x") or raw_hex.startswith("0X"):
+                raw_hex = raw_hex[2:]
+
+            raw_hex = raw_hex.upper()
+            now = time.time()
+
+            # Deduplication: skip if already processed from RX_LOG_DATA
+            recent_time = self.recent_rf_packets.get(raw_hex)
+            if recent_time is not None and (now - recent_time) < self.raw_duplicate_window:
+                if self.debug:
+                    logger.debug(f"[{self.name}] Skipping RAW_DATA already processed from RX_LOG_DATA")
+                return
+
+            self.recent_rf_packets = {
+                k: v for k, v in self.recent_rf_packets.items()
+                if now - v < self.raw_duplicate_window
+            }
+
+            packet_prefix = raw_hex[:32]
+            rf_data = self.rf_data_cache.get(packet_prefix)
+
+            formatted = self._format_packet_data(raw_hex, rf_data)
             self._output_packet(formatted)
+        except Exception as e:
+            logger.error(f"[{self.name}] Error in _on_raw_data: {e}", exc_info=True)
 
     async def _on_advert(self, data):
         if self.verbose:
@@ -1268,10 +1293,9 @@ class Mqtt:
 
     def _output_packet(self, packet_data: dict):
         self.packet_count += 1
-        if self.verbose or self.debug:
-            route = packet_data.get("route", "")
-            ptype = packet_data.get("packet_type", "")
-            logger.info(f"[{self.name}] Packet #{self.packet_count}: Type={ptype} Route={route} SNR={packet_data.get('SNR')} RSSI={packet_data.get('RSSI')}")
+        route = packet_data.get("route", "")
+        ptype = packet_data.get("packet_type", "")
+        logger.info(f"📦 [{self.name}] Captured packet #{self.packet_count}: Route={route} Type={ptype} Len={packet_data.get('len')} SNR={packet_data.get('SNR')} RSSI={packet_data.get('RSSI')} Hash={packet_data.get('hash')}")
             
         if self.output_handle:
             try:
