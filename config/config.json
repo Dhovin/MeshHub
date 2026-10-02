@@ -44,6 +44,20 @@
       "keyword": "#checkin",
       "state_file": "net_state.json"
     },
+    "meshwars_bot": {
+      "enabled": true,
+      "channel": "#meshwars",
+      "day_of_week": "Tuesday",
+      "time": "18:00",
+      "duration": 6,
+      "opening_message": "Welcome to the MeshWars net! Make sure to register on https://meshwars.com and send any message in this chat. This net runs every tuesday from 6pm to midnight.",
+      "halfway_message": "MeshWars Net Update: We are halfway through tonight's net! {count} {user_str} checked in so far. Register on https://meshwars.com and send any message in this chat.",
+      "final_hour_message": "MeshWars Net Update: 1 hour remaining in tonight's net! {count} {user_str} checked in so far. Register on https://meshwars.com and send any message in this chat.",
+      "closing_message": "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today.",
+      "enable_reminders": true,
+      "enable_mid_net_updates": true,
+      "state_file": "meshwars_state.json"
+    },
     "template": {
       "enabled": true,
       "messagePrefix": "[MeshHub]",
