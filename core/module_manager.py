@@ -92,6 +92,12 @@ class ModuleAPI:
                     allowed.add(int(ch))
                 elif isinstance(ch, int):
                     allowed.add(str(ch))
+                elif isinstance(ch, str):
+                    clean = ch.strip().lower()
+                    allowed.add(clean)
+                    no_hash = clean.lstrip("#")
+                    allowed.add(no_hash)
+                    allowed.add(f"#{no_hash}")
         logger.info(f"Module '{self.module_name}' declared allowed channels: {list(allowed)}")
 
     async def request_channel(self, channel_name):
@@ -397,6 +403,9 @@ class ModuleManager:
         elif isinstance(channel_id, str):
             if channel_id.isdigit() and int(channel_id) in allowed:
                 return True
+            clean = channel_id.strip().lower()
+            if clean in allowed or clean.lstrip("#") in allowed or f"#{clean.lstrip('#')}" in allowed:
+                return True
                 
         # Resolve via connection_manager channels cache
         channels_cache = []
@@ -405,11 +414,14 @@ class ModuleManager:
             
         if isinstance(channel_id, str) and not channel_id.isdigit():
             # channel_id is a name
+            target_norm = channel_id.strip().lower().lstrip("#")
             for ch in channels_cache:
-                if ch and ch.get("channel_name") == channel_id:
-                    idx = ch.get("channel_idx")
-                    if idx in allowed or str(idx) in allowed:
-                        return True
+                if ch:
+                    ch_name = str(ch.get("channel_name", "")).strip().lower().lstrip("#")
+                    if ch_name == target_norm:
+                        idx = ch.get("channel_idx")
+                        if idx in allowed or str(idx) in allowed:
+                            return True
         else:
             # channel_id is an index
             try:
@@ -419,6 +431,10 @@ class ModuleManager:
                         name = ch.get("channel_name")
                         if name in allowed:
                             return True
+                        if isinstance(name, str):
+                            name_norm = name.strip().lower().lstrip("#")
+                            if name_norm in allowed or f"#{name_norm}" in allowed:
+                                return True
             except (ValueError, TypeError):
                 pass
                 

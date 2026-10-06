@@ -1092,17 +1092,27 @@ def print_cli_options():
     print("    wait_ack, -wa                       - Wait up to 5 seconds for message ACK")
     print("    msgs_subscribe, -ms                 - Subscribe to messages in daemon logs")
     print()
-    print("  Channels:")
+    print("  Channels & Data:")
     print("    channels, -chans                    - Print active channel slots")
     print("    get_channel <idx_or_nm>             - Print specific channel slot details")
     print("    set_channel <idx_or_nm> [nm] [k]    - Set/add channel info (hash channels do not need a key)")
     print("    add_channel <name> [key_hex]        - Add a new channel (hash channels do not need a key)")
     print("    remove_channel <idx_or_name>        - Remove channel (by index or name)")
+    print("    chan_data <chan> <type> <hex>       - Send channel data packet")
     print("    scope <s>                           - Set flood scope")
     print()
     print("  Management:")
     print("    advert, -a                          - Send device advertisement")
     print("    floodadv                            - Flood device advertisement")
+    print("    send_raw <hex>                      - Send raw packet payload")
+    print("    bat, battery                        - Print device battery voltage and percentage")
+    print("    stats, status                       - Print device core, radio, and packet statistics")
+    print("    reset_advert_time <ct>, -rat        - Reset last advert timestamp for contact")
+    print("    tuning [freq_off,bw_off]            - Get or set radio tuning parameters")
+    print("    radio [freq,bw,sf,cr[,repeat]]      - Get or set radio parameters")
+    print("    tx <power>                          - Set transmission power")
+    print("    coords <lat> <lon>                  - Set device GPS coordinates")
+    print("    cli <command...>                    - Execute companion CLI command")
     print("    get <param>                         - Get setting (name, tx, coords, repeat, bat, private_key, telemetry_mode_base/loc/env, advert_loc_policy, etc.)")
     print("    set <setting> <value>               - Set setting (name, tx_power, pin, radio, lat, lon, coords, autoadd_config, telemetry_mode_base/loc/env, advert_loc_policy)")
     print("    node_discover, -nd                  - Discover active nodes on the network")
@@ -1165,17 +1175,28 @@ def run_cli_cmd(cmds):
             ):
                 cmds[0] = stripped
     
-    # Check for -pub / --pub flags and strip them for contacts commands
+    # Check for -pub, -sa, -sd, -st, -q flags and strip them for contacts commands
     show_pub = False
+    sort_by = None
+    quiet_mode = False
     if cmds:
         has_contacts = any(token.lower() in ("contacts", "list", "lc", "reload_contacts", "rc") for token in cmds)
         if has_contacts:
-            if "-pub" in cmds:
+            if "-pub" in cmds or "--pub" in cmds:
                 show_pub = True
-                cmds = [x for x in cmds if x != "-pub"]
-            if "--pub" in cmds:
-                show_pub = True
-                cmds = [x for x in cmds if x != "--pub"]
+                cmds = [x for x in cmds if x not in ("-pub", "--pub")]
+            if "-sa" in cmds:
+                sort_by = "sa"
+                cmds = [x for x in cmds if x != "-sa"]
+            if "-sd" in cmds:
+                sort_by = "sd"
+                cmds = [x for x in cmds if x != "-sd"]
+            if "-st" in cmds:
+                sort_by = "st"
+                cmds = [x for x in cmds if x != "-st"]
+            if "-q" in cmds:
+                quiet_mode = True
+                cmds = [x for x in cmds if x != "-q"]
 
     # Validate CLI command formatting client-side
     cmd_name = cmds[0].lower()
@@ -1190,6 +1211,34 @@ def run_cli_cmd(cmds):
         if len(cmds) < 3:
             print("Error: Missing arguments for chan command.")
             print("Usage: MeshHub cli chan <channel_idx_or_name> <message>")
+            print()
+            print_cli_options()
+            return
+    elif cmd_name == "chan_data":
+        if len(cmds) < 4:
+            print("Error: Missing arguments for chan_data command.")
+            print("Usage: MeshHub cli chan_data <channel> <datatype> <hex_payload>")
+            print()
+            print_cli_options()
+            return
+    elif cmd_name == "send_raw":
+        if len(cmds) < 2:
+            print("Error: Missing arguments for send_raw command.")
+            print("Usage: MeshHub cli send_raw <hex_packet>")
+            print()
+            print_cli_options()
+            return
+    elif cmd_name in ("reset_advert_time", "rat"):
+        if len(cmds) < 2:
+            print("Error: Missing arguments for reset_advert_time command.")
+            print("Usage: MeshHub cli reset_advert_time <contact>")
+            print()
+            print_cli_options()
+            return
+    elif cmd_name == "cli":
+        if len(cmds) < 2:
+            print("Error: Missing arguments for cli command.")
+            print("Usage: MeshHub cli cli <command...>")
             print()
             print_cli_options()
             return
@@ -1221,17 +1270,10 @@ def run_cli_cmd(cmds):
             print()
             print_cli_options()
             return
-    elif cmd_name in ("infos", "i", "query", "q", "ver", "reboot", "self_telemetry", "t", "reload_contacts", "rc"):
+    elif cmd_name in ("infos", "i", "query", "q", "ver", "reboot", "self_telemetry", "t", "reload_contacts", "rc", "bat", "battery"):
         if len(cmds) > 1:
             print(f"Error: Command '{cmds[0]}' does not accept extra arguments.")
             print(f"Usage: MeshHub cli {cmds[0]}")
-            print()
-            print_cli_options()
-            return
-    elif cmd_name in ("contacts", "list", "lc"):
-        if len(cmds) > 1:
-            print(f"Error: Command '{cmds[0]}' only accepts the optional -pub flag.")
-            print(f"Usage: MeshHub cli {cmds[0]} [-pub]")
             print()
             print_cli_options()
             return
@@ -1264,7 +1306,11 @@ def run_cli_cmd(cmds):
         "req_telemetry", "rt", "req_regions", "rr", "req_owner", "ro", "req_clock", "req_mma", "rm",
         "pending_contacts", "add_pending", "flush_pending", "login", "l", "logout", "cmd", "c", "[",
         "wmt8", "]", "req_status", "rs", "req_neighbours", "rn", "req_binary", "trace", "tr", "wait_ack", "wa",
-        "st", "sync_time", "{", "}"
+        "st", "sync_time", "{", "}",
+        "chan_data", "send_raw", "bat", "battery", "stats", "stats_core", "stats_packets", "stats_radio", "fstats",
+        "reset_advert_time", "rat", "tuning", "radio", "tx", "coords", "lat", "lon", "pin", "name",
+        "autoadd_config", "advert_loc_policy", "path_hash_mode", "allowed_repeat_freq", "default_scope",
+        "cli", "export_private_key", "import_private_key"
     ):
         print(f"Error: Unrecognized CLI command '{cmds[0]}'.")
         print_cli_options()
@@ -1374,21 +1420,36 @@ def run_cli_cmd(cmds):
                     3: "Room Server",
                     4: "Sensor"
                 }
-                if show_pub:
+                contacts_list = list(res.values())
+                if sort_by == "sa":
+                    contacts_list = sorted(contacts_list, key=lambda x: x.get("last_advert", 0), reverse=True)
+                elif sort_by == "sd":
+                    contacts_list = sorted(contacts_list, key=lambda x: x.get("distance", 0))
+                elif sort_by == "st":
+                    contacts_list = sorted(contacts_list, key=lambda x: (x.get("type", 1), x.get("adv_name", "").lower()))
+                else:
+                    contacts_list = sorted(contacts_list, key=lambda x: x.get("adv_name", "").lower())
+
+                if quiet_mode:
+                    for c in contacts_list:
+                        name = c.get("adv_name") or c.get("name") or "Unknown"
+                        print(name)
+                elif show_pub:
                     print(f"{'Contact Name':<30} | {'Type':<15} | {'Public Key'}")
                     print("-" * 115)
+                    for c in contacts_list:
+                        name = c.get("adv_name") or c.get("name") or "Unknown"
+                        t_val = c.get("type", 1)
+                        t_str = type_map.get(t_val, f"Unknown ({t_val})")
+                        pubkey = c.get("public_key") or "N/A"
+                        print(f"{name:<30} | {t_str:<15} | {pubkey}")
                 else:
                     print(f"{'Contact Name':<30} | {'Type':<15}")
                     print("-" * 50)
-                sorted_contacts = sorted(res.values(), key=lambda x: x.get("adv_name", "").lower())
-                for c in sorted_contacts:
-                    name = c.get("adv_name") or c.get("name") or "Unknown"
-                    t_val = c.get("type", 1)
-                    t_str = type_map.get(t_val, f"Unknown ({t_val})")
-                    if show_pub:
-                        pubkey = c.get("public_key") or "N/A"
-                        print(f"{name:<30} | {t_str:<15} | {pubkey}")
-                    else:
+                    for c in contacts_list:
+                        name = c.get("adv_name") or c.get("name") or "Unknown"
+                        t_val = c.get("type", 1)
+                        t_str = type_map.get(t_val, f"Unknown ({t_val})")
                         print(f"{name:<30} | {t_str:<15}")
             elif cmds and cmds[0].lower() in ("channels", "chans", "get_channels") and isinstance(res, list):
                 for c in res:

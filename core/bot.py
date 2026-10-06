@@ -518,7 +518,8 @@ class MeshHub:
 
                 if empty_slot is None:
                     existing_indices = [ch.get("channel_idx", 0) for ch in node_channels if ch]
-                    empty_slot = max(existing_indices) + 1 if existing_indices else 1
+                    available = [i for i in range(1, 8) if i not in existing_indices]
+                    empty_slot = available[0] if available else (max(existing_indices) + 1 if existing_indices else 1)
 
                 logger.info(f"Startup channel sync: adding '#' channel '{hash_ch}' to node at slot {empty_slot}")
                 res = await self.connection_manager.execute(["set_channel", str(empty_slot), hash_ch])

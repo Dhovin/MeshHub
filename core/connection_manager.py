@@ -3,6 +3,7 @@ import json
 import shlex
 import logging
 import asyncio
+import hashlib
 import serial.tools.list_ports
 from meshcore.meshcore import MeshCore
 from meshcore.events import EventType
@@ -262,6 +263,15 @@ class ConnectionManager:
                     if not self.bot.module_manager.is_channel_allowed(active_module, new_name):
                         is_allowed = False
                         denied_channel = new_name
+            elif cmd == "chan_data":
+                if len(cmds) > 1:
+                    chan_id = cmds[1]
+                    if not self.bot.module_manager.is_channel_allowed(active_module, chan_id):
+                        is_allowed = False
+                        denied_channel = chan_id
+                else:
+                    is_allowed = False
+                    denied_channel = "unknown"
             elif cmd == "remove_channel":
                 if len(cmds) > 1:
                     chan_id = cmds[1]
@@ -274,7 +284,7 @@ class ConnectionManager:
                 return {"error": f"Access denied: Module '{active_module}' is not authorized to use channel '{denied_channel}'."}
 
         # Enforce airtime transmission rate limits
-        if self.tx_limiter and cmd in ("chan", "ch", "msg", "send_raw", "advert", "send"):
+        if self.tx_limiter and cmd in ("chan", "ch", "msg", "send_raw", "advert", "send", "chan_data", "public", "dch"):
             await self.tx_limiter.wait_for_tx()
 
         try:
@@ -491,34 +501,60 @@ class ConnectionManager:
             elif cmd == "add_channel":
                 if len(cmds) < 2:
                     return {"error": "Usage: add_channel <name> [key_hex]"}
-                name_arg = cmds[1]
+                # Support add_channel <name> [key_hex] or add_channel <slot> <name> [key_hex]
+                if len(cmds) >= 3 and cmds[1].isdigit() and not cmds[2].isdigit():
+                    slot_override = int(cmds[1])
+                    name_arg = cmds[2]
+                    key_raw = cmds[3] if len(cmds) > 3 else None
+                else:
+                    slot_override = None
+                    name_arg = cmds[1]
+                    key_raw = cmds[2] if len(cmds) > 2 else None
+
                 key_arg = None
-                if len(cmds) > 2:
+                if key_raw:
                     try:
-                        key_arg = bytes.fromhex(cmds[2])
+                        key_arg = bytes.fromhex(key_raw)
                     except ValueError:
                         return {"error": "Key must be a valid hex string"}
-                # Find the first available empty slot (never slot 0)
-                if not hasattr(self.mc, 'channels') or not self.mc.channels:
-                    await self.execute("channels")
-                channels = getattr(self.mc, 'channels', []) or []
-                empty_slot = None
-                for ch in channels:
-                    if ch and ch.get("channel_idx", 0) != 0 and not str(ch.get("channel_name", "")).strip():
-                        empty_slot = ch.get("channel_idx")
-                        break
-                if empty_slot is None:
-                    existing_indices = [ch.get("channel_idx", 0) for ch in channels if ch]
-                    empty_slot = max(existing_indices) + 1 if existing_indices else 1
-                nb = empty_slot
+
+                if slot_override is not None:
+                    nb = slot_override
+                else:
+                    if not hasattr(self.mc, 'channels') or not self.mc.channels:
+                        await self.execute("channels")
+                    channels = getattr(self.mc, 'channels', []) or []
+                    empty_slot = None
+                    for ch in channels:
+                        if ch and ch.get("channel_idx", 0) != 0 and not str(ch.get("channel_name", "")).strip():
+                            empty_slot = ch.get("channel_idx")
+                            break
+                    if empty_slot is None:
+                        existing_indices = [ch.get("channel_idx", 0) for ch in channels if ch]
+                        available = [i for i in range(1, 8) if i not in existing_indices]
+                        empty_slot = available[0] if available else (max(existing_indices) + 1 if existing_indices else 1)
+                    nb = empty_slot
 
                 res = await self.mc.commands.set_channel(nb, name_arg, key_arg)
                 if res.type == EventType.ERROR:
                     return {"error": f"Failed to add channel: {res}"}
+                
+                await asyncio.sleep(0.1)
                 res_info = await self.mc.commands.get_channel(nb)
                 if res_info.type == EventType.ERROR:
-                    return {"error": f"Failed to retrieve updated channel info: {res_info}"}
-                info = dict(res_info.payload)
+                    await asyncio.sleep(0.2)
+                    res_info = await self.mc.commands.get_channel(nb)
+                
+                if res_info.type != EventType.ERROR:
+                    info = dict(res_info.payload)
+                else:
+                    fallback_key = key_arg if key_arg is not None else hashlib.sha256(name_arg.encode("utf-8")).digest()[:16]
+                    info = {
+                        "channel_idx": nb,
+                        "channel_name": name_arg,
+                        "channel_secret": fallback_key.hex() if isinstance(fallback_key, bytes) else str(fallback_key)
+                    }
+
                 if "channel_secret" in info and isinstance(info["channel_secret"], bytes):
                     info["channel_secret"] = info["channel_secret"].hex()
                 if not hasattr(self.mc, 'channels'):
@@ -551,7 +587,8 @@ class ConnectionManager:
                                 break
                         if empty_slot is None:
                             existing_indices = [ch.get("channel_idx", 0) for ch in channels if ch]
-                            empty_slot = max(existing_indices) + 1 if existing_indices else 1
+                            available = [i for i in range(1, 8) if i not in existing_indices]
+                            empty_slot = available[0] if available else (max(existing_indices) + 1 if existing_indices else 1)
                         nb = empty_slot
                 else:
                     # set_channel <idx_or_name> <name> [key_hex]
@@ -563,6 +600,7 @@ class ConnectionManager:
                             key_arg = bytes.fromhex(cmds[3])
                         except ValueError:
                             return {"error": "Key must be a valid hex string"}
+
                     if chan_arg.isdigit():
                         nb = int(chan_arg)
                     else:
@@ -577,10 +615,23 @@ class ConnectionManager:
                 res = await self.mc.commands.set_channel(nb, name_arg, key_arg)
                 if res.type == EventType.ERROR:
                     return {"error": f"Failed to set channel: {res}"}
+
+                await asyncio.sleep(0.1)
                 res_info = await self.mc.commands.get_channel(nb)
                 if res_info.type == EventType.ERROR:
-                    return {"error": f"Failed to retrieve updated channel info: {res_info}"}
-                info = dict(res_info.payload)
+                    await asyncio.sleep(0.2)
+                    res_info = await self.mc.commands.get_channel(nb)
+
+                if res_info.type != EventType.ERROR:
+                    info = dict(res_info.payload)
+                else:
+                    fallback_key = key_arg if key_arg is not None else hashlib.sha256(name_arg.encode("utf-8")).digest()[:16]
+                    info = {
+                        "channel_idx": nb,
+                        "channel_name": name_arg,
+                        "channel_secret": fallback_key.hex() if isinstance(fallback_key, bytes) else str(fallback_key)
+                    }
+
                 if "channel_secret" in info and isinstance(info["channel_secret"], bytes):
                     info["channel_secret"] = info["channel_secret"].hex()
                 if not hasattr(self.mc, 'channels'):
@@ -617,6 +668,237 @@ class ConnectionManager:
                     if hasattr(self.mc, 'channels') and nb < len(self.mc.channels):
                         self.mc.channels[nb] = {"channel_idx": nb, "channel_name": "", "channel_secret": 16 * "00"}
                 return {"ok": f"channel {nb} removed"}
+            elif cmd == "chan_data":
+                if len(cmds) < 4:
+                    return {"error": "Usage: chan_data <channel> <datatype> <hex_payload>"}
+                chan_arg = cmds[1]
+                if chan_arg.isdigit():
+                    nb = int(chan_arg)
+                else:
+                    if not hasattr(self.mc, 'channels') or not self.mc.channels:
+                        await self.execute("channels")
+                    chan = self._get_channel_by_name(chan_arg)
+                    if not chan:
+                        return {"error": f"Invalid channel: {chan_arg}"}
+                    nb = chan.get("channel_idx", 0)
+                try:
+                    datatype = int(cmds[2])
+                    payload_bytes = bytes.fromhex(cmds[3])
+                except ValueError as e:
+                    return {"error": f"Invalid arguments: {e}"}
+                res = await self.mc.commands.send_channel_data(nb, datatype, payload_bytes)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to send channel data: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "send_raw":
+                if len(cmds) < 2:
+                    return {"error": "Usage: send_raw <hex_packet>"}
+                try:
+                    raw_pkt = cmds[1]
+                    raw_bytes = bytes.fromhex(raw_pkt)
+                except ValueError as e:
+                    return {"error": f"Invalid hex packet: {e}"}
+                if hasattr(self.mc.commands, 'send_raw_packet'):
+                    res = await self.mc.commands.send_raw_packet(raw_pkt if isinstance(raw_pkt, (str, bytes)) else raw_bytes)
+                elif hasattr(self.mc.commands, 'send_raw_data'):
+                    res = await self.mc.commands.send_raw_data(raw_bytes)
+                else:
+                    return {"error": "send_raw not supported by companion library"}
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to send raw packet: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd in ("reset_advert_time", "rat"):
+                if len(cmds) < 2:
+                    return {"error": "Usage: reset_advert_time <contact>"}
+                contact = await self._get_contact(cmds[1])
+                if not contact:
+                    return {"error": f"Unknown contact: {cmds[1]}"}
+                contact['last_advert'] = 0
+                res = await self.mc.commands.update_contact(contact)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to reset advert time for {cmds[1]}: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd in ("bat", "battery"):
+                res = await self.mc.commands.get_bat()
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to get battery status: {res}"}
+                return res.payload
+            elif cmd in ("stats", "status"):
+                stats = {}
+                res_core = await self.mc.commands.get_stats_core()
+                if res_core.type != EventType.ERROR and res_core.payload:
+                    stats.update(res_core.payload)
+                res_rad = await self.mc.commands.get_stats_radio()
+                if res_rad.type != EventType.ERROR and res_rad.payload:
+                    stats.update(res_rad.payload)
+                res_pkt = await self.mc.commands.get_stats_packets()
+                if res_pkt.type != EventType.ERROR and res_pkt.payload:
+                    stats.update(res_pkt.payload)
+                return stats
+            elif cmd == "stats_core":
+                res = await self.mc.commands.get_stats_core()
+                return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+            elif cmd == "stats_packets":
+                res = await self.mc.commands.get_stats_packets()
+                return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+            elif cmd in ("stats_radio", "fstats"):
+                if cmd == "fstats":
+                    res = await self.mc.commands.get_bat()
+                    return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+                res = await self.mc.commands.get_stats_radio()
+                return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+            elif cmd == "tuning":
+                if len(cmds) < 2:
+                    res = await self.mc.commands.get_tuning()
+                    return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+                params = cmds[1].split(",")
+                if len(params) < 2:
+                    return {"error": "Usage: tuning <freq_offset>,<bw_offset>"}
+                res = await self.mc.commands.set_tuning(int(params[0]), int(params[1]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set tuning: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "radio":
+                if len(cmds) < 2:
+                    await self.mc.commands.send_appstart()
+                    return {
+                        "radio_freq": self.mc.self_info.get("radio_freq"),
+                        "radio_bw": self.mc.self_info.get("radio_bw"),
+                        "radio_sf": self.mc.self_info.get("radio_sf"),
+                        "radio_cr": self.mc.self_info.get("radio_cr")
+                    }
+                params = cmds[1].split(",")
+                if len(params) > 4:
+                    repeat = params[4] in ("repeat", "on", "1", "yes")
+                    res = await self.mc.commands.set_radio(params[0], params[1], params[2], params[3], repeat)
+                else:
+                    res = await self.mc.commands.set_radio(*params)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set radio: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "tx":
+                if len(cmds) < 2:
+                    return {"error": "Usage: tx <power>"}
+                res = await self.mc.commands.set_tx_power(int(cmds[1]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set TX power: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "coords":
+                if len(cmds) < 3:
+                    return {"error": "Usage: coords <lat> <lon>"}
+                res = await self.mc.commands.set_coords(float(cmds[1]), float(cmds[2]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set coordinates: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "lat":
+                if len(cmds) < 2:
+                    return {"error": "Usage: lat <lat>"}
+                await self.mc.commands.send_appstart()
+                lon = self.mc.self_info.get("adv_lon", 0.0)
+                res = await self.mc.commands.set_coords(float(cmds[1]), float(lon))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set latitude: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "lon":
+                if len(cmds) < 2:
+                    return {"error": "Usage: lon <lon>"}
+                await self.mc.commands.send_appstart()
+                lat = self.mc.self_info.get("adv_lat", 0.0)
+                res = await self.mc.commands.set_coords(float(lat), float(cmds[1]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set longitude: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "pin":
+                if len(cmds) < 2:
+                    return {"error": "Usage: pin <pincode>"}
+                res = await self.mc.commands.set_devicepin(int(cmds[1]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set pin: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "name":
+                if len(cmds) < 2:
+                    return {"error": "Usage: name <name>"}
+                res = await self.mc.commands.set_name(cmds[1])
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set name: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "autoadd_config":
+                if len(cmds) < 2:
+                    res = await self.mc.commands.get_autoadd_config()
+                    return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+                arg = cmds[1].lower()
+                try:
+                    flags = int(arg, 0)
+                except ValueError:
+                    flags = 0
+                    if "ov" in arg:
+                        flags |= 0x01
+                    if "cha" in arg or "cli" in arg:
+                        flags |= 0x02
+                    if "rep" in arg or "rpt" in arg:
+                        flags |= 0x04
+                res = await self.mc.commands.set_autoadd_config(flags)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set autoadd_config: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "advert_loc_policy":
+                if len(cmds) < 2:
+                    await self.mc.commands.send_appstart()
+                    return {"advert_loc_policy": self.mc.self_info.get("adv_loc_policy")}
+                res = await self.mc.commands.set_advert_loc_policy(int(cmds[1]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set advert_loc_policy: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd in ("path_hash_mode", "path.hash.mode"):
+                if len(cmds) < 2:
+                    res = await self.mc.commands.get_path_hash_mode()
+                    return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+                res = await self.mc.commands.set_path_hash_mode(int(cmds[1]))
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set path_hash_mode: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "allowed_repeat_freq":
+                res = await self.mc.commands.get_allowed_repeat_freq()
+                return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+            elif cmd == "default_scope":
+                if len(cmds) < 2:
+                    res = await self.mc.commands.get_default_flood_scope()
+                    return res.payload if res.type != EventType.ERROR else {"error": str(res)}
+                scope = cmds[1]
+                if scope in ("None", "0", "clear", ""):
+                    res = await self.mc.commands.reset_default_flood_scope()
+                else:
+                    res = await self.mc.commands.set_default_flood_scope(scope)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to set default_scope: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "cli":
+                if len(cmds) < 2:
+                    return {"error": "Usage: cli <command...>"}
+                cli_cmd = " ".join(cmds[1:])
+                res = await self.mc.commands.run_cli_command(cli_cmd)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to run cli command: {res}"}
+                return res.payload if res.payload else {"ok": True}
+            elif cmd == "export_private_key":
+                res = await self.mc.commands.export_private_key()
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to export private key: {res}"}
+                payload = dict(res.payload)
+                if "private_key" in payload and isinstance(payload["private_key"], bytes):
+                    payload["private_key"] = payload["private_key"].hex()
+                return payload
+            elif cmd == "import_private_key":
+                if len(cmds) < 2:
+                    return {"error": "Usage: import_private_key <hex_key>"}
+                try:
+                    kbytes = bytes.fromhex(cmds[1])
+                except ValueError:
+                    return {"error": "Invalid hex key"}
+                res = await self.mc.commands.import_private_key(kbytes)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to import private key: {res}"}
+                return res.payload if res.payload else {"ok": True}
             elif cmd == "scope":
                 if len(cmds) < 2:
                     return {"error": "Usage: scope <scope_val>"}
@@ -1404,6 +1686,7 @@ class ConnectionManager:
         self.mc.subscribe(EventType.DISCONNECTED, self._on_disconnect)
         self.mc.subscribe(EventType.RX_LOG_DATA, self._on_rx_log_data)
         self.mc.subscribe(EventType.RAW_DATA, self._on_raw_data)
+        self.mc.subscribe(EventType.CHANNEL_DATA_RECV, self._on_channel_data)
         self.mc.subscribe(EventType.SELF_INFO, self._on_self_info)
 
     async def _run_handshake(self):
@@ -1754,11 +2037,33 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"Error handling self info event: {e}", exc_info=True)
 
+    def _on_channel_data(self, event):
+        try:
+            logger.debug(f"Received channel data event: {event.payload}")
+            self.bot.event_bus.publish("channel_data_received", event.payload)
+            self.bot.event_bus.publish("channel_data", event.payload)
+        except Exception as e:
+            logger.error(f"Error handling channel data event: {e}", exc_info=True)
+
     def _get_channel_by_name(self, name):
-        channels = getattr(self.mc, 'channels', [])
+        channels = getattr(self.mc, 'channels', []) or []
+        target = str(name).strip()
+        # 1. Exact match
         for ch in channels:
-            if ch.get("channel_name") == name:
+            if ch and ch.get("channel_name") == target:
                 return ch
+        # 2. Case-insensitive / hash-stripped match
+        target_norm = target.lower().lstrip("#")
+        for ch in channels:
+            if ch:
+                ch_name = str(ch.get("channel_name", "")).strip()
+                if ch_name.lower().lstrip("#") == target_norm:
+                    return ch
+        # 3. Empty name match (for finding empty slot)
+        if target == "":
+            for ch in channels:
+                if ch and str(ch.get("channel_name", "")).strip() == "" and ch.get("channel_idx", 0) != 0:
+                    return ch
         return None
 
     def _load_contacts(self):

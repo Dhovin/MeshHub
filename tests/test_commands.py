@@ -588,3 +588,128 @@ class TestConnectionManagerCommands(unittest.TestCase):
             self.assertEqual(res["expected_ack"], "01")
         finally:
             loop.close()
+
+    def test_chan_data_command(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.cm.mc.commands.send_channel_data = AsyncMock(return_value=self.mock_event(EventType.OK, {"status": "sent"}))
+            # Test by numeric channel index
+            res = loop.run_until_complete(self.cm.execute("chan_data 0 1 aabb"))
+            self.assertEqual(res, {"status": "sent"})
+            self.cm.mc.commands.send_channel_data.assert_called_with(0, 1, bytes.fromhex("aabb"))
+
+            # Test by channel name
+            self.cm.mc.channels = [{"channel_idx": 1, "channel_name": "#wx", "channel_secret": "00"*16}]
+            res = loop.run_until_complete(self.cm.execute("chan_data #wx 2 ccdd"))
+            self.assertEqual(res, {"status": "sent"})
+            self.cm.mc.commands.send_channel_data.assert_called_with(1, 2, bytes.fromhex("ccdd"))
+        finally:
+            loop.close()
+
+    def test_send_raw_command(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.cm.mc.commands.send_raw_packet = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+            res = loop.run_until_complete(self.cm.execute("send_raw 123456"))
+            self.assertEqual(res, {"ok": True})
+            self.cm.mc.commands.send_raw_packet.assert_called_once()
+        finally:
+            loop.close()
+
+    def test_battery_and_stats_commands(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.cm.mc.commands.get_bat = AsyncMock(return_value=self.mock_event(EventType.OK, {"voltage": 4.1, "percent": 90}))
+            self.cm.mc.commands.get_stats_core = AsyncMock(return_value=self.mock_event(EventType.OK, {"uptime": 1000}))
+            self.cm.mc.commands.get_stats_radio = AsyncMock(return_value=self.mock_event(EventType.OK, {"rx_packets": 50}))
+            self.cm.mc.commands.get_stats_packets = AsyncMock(return_value=self.mock_event(EventType.OK, {"tx_packets": 30}))
+
+            res = loop.run_until_complete(self.cm.execute("bat"))
+            self.assertEqual(res["voltage"], 4.1)
+
+            res = loop.run_until_complete(self.cm.execute("stats"))
+            self.assertEqual(res["uptime"], 1000)
+            self.assertEqual(res["rx_packets"], 50)
+            self.assertEqual(res["tx_packets"], 30)
+        finally:
+            loop.close()
+
+    def test_reset_advert_time_command(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            contact = {"public_key": "key1", "adv_name": "Alice", "last_advert": 12345}
+            self.cm._get_contact = AsyncMock(return_value=contact)
+            self.cm.mc.commands.update_contact = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+
+            res = loop.run_until_complete(self.cm.execute("reset_advert_time Alice"))
+            self.assertEqual(res, {"ok": True})
+            self.assertEqual(contact["last_advert"], 0)
+            self.cm.mc.commands.update_contact.assert_called_once_with(contact)
+        finally:
+            loop.close()
+
+    def test_cli_remote_command(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.cm.mc.commands.run_cli_command = AsyncMock(return_value=self.mock_event(EventType.OK, {"text": "hello"}))
+            res = loop.run_until_complete(self.cm.execute("cli ping"))
+            self.assertEqual(res, {"text": "hello"})
+            self.cm.mc.commands.run_cli_command.assert_called_with("ping")
+        finally:
+            loop.close()
+
+    def test_radio_and_tuning_commands(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.cm.mc.commands.set_tuning = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+            self.cm.mc.commands.set_radio = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+            self.cm.mc.commands.set_tx_power = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+            self.cm.mc.commands.set_coords = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+            self.cm.mc.commands.set_devicepin = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+            self.cm.mc.commands.set_name = AsyncMock(return_value=self.mock_event(EventType.OK, {"ok": True}))
+
+            res = loop.run_until_complete(self.cm.execute("tuning 10,20"))
+            self.assertEqual(res, {"ok": True})
+            self.cm.mc.commands.set_tuning.assert_called_with(10, 20)
+
+            res = loop.run_until_complete(self.cm.execute("tx 20"))
+            self.assertEqual(res, {"ok": True})
+            self.cm.mc.commands.set_tx_power.assert_called_with(20)
+
+            res = loop.run_until_complete(self.cm.execute("coords 32.5 -96.5"))
+            self.assertEqual(res, {"ok": True})
+            self.cm.mc.commands.set_coords.assert_called_with(32.5, -96.5)
+
+            res = loop.run_until_complete(self.cm.execute("pin 123456"))
+            self.assertEqual(res, {"ok": True})
+            self.cm.mc.commands.set_devicepin.assert_called_with(123456)
+
+            res = loop.run_until_complete(self.cm.execute("name MyNode"))
+            self.assertEqual(res, {"ok": True})
+            self.cm.mc.commands.set_name.assert_called_with("MyNode")
+        finally:
+            loop.close()
+
+    def test_resilient_channel_add_fallback_when_get_channel_fails(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            self.cm.mc.channels = [{"channel_idx": 0, "channel_name": "primary", "channel_secret": "00"*16}]
+            # set_channel succeeds, but get_channel returns ERROR
+            self.cm.mc.commands.set_channel = AsyncMock(return_value=self.mock_event(EventType.OK))
+            self.cm.mc.commands.get_channel = AsyncMock(return_value=self.mock_event(EventType.ERROR, "transient error"))
+
+            res = loop.run_until_complete(self.cm.execute("add_channel #wx"))
+            # Must succeed via fallback without raising error
+            self.assertEqual(res["channel_idx"], 1)
+            self.assertEqual(res["channel_name"], "#wx")
+            self.assertTrue(len(res["channel_secret"]) > 0)
+            self.assertEqual(self.cm.mc.channels[1]["channel_name"], "#wx")
+        finally:
+            loop.close()
