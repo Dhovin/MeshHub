@@ -287,5 +287,124 @@ class TestStartupChannelSync(unittest.TestCase):
 
             bot.connection_manager.execute.assert_not_called()
 
+    def test_weather_module_channels_without_hash_are_normalized_and_added(self):
+        with patch.object(MeshHub, 'load_and_validate_config'), \
+             patch.object(MeshHub, 'setup_logging'):
+            bot = MeshHub()
+            bot.connection_manager.isConnected = True
+            
+            # Weather module configured with plain 'weather' (no # prefix)
+            bot.config = {
+                "modules": {
+                    "weather_bot": {
+                        "enabled": True,
+                        "channels": {"alerts": "weather", "weather": "weather"}
+                    }
+                }
+            }
+            # Module manager has 'weather'
+            bot.module_manager.module_channels = {"weather_bot": {"weather"}}
+
+            node_channels = [
+                {"channel_idx": 0, "channel_name": "primary"},
+                {"channel_idx": 1, "channel_name": ""}
+            ]
+
+            executed_commands = []
+            async def mock_execute(cmd):
+                executed_commands.append(cmd)
+                if cmd == "channels":
+                    return node_channels
+                return {"ok": True}
+
+            bot.connection_manager.execute = AsyncMock(side_effect=mock_execute)
+
+            self.loop.run_until_complete(bot.sync_channels())
+
+            # Must normalize 'weather' to '#weather' and add to slot 1
+            bot.connection_manager.execute.assert_any_call(["set_channel", "1", "#weather"])
+            self.assertNotIn(["remove_channel", "0"], executed_commands)
+
+    def test_weather_module_dual_channels_added(self):
+        with patch.object(MeshHub, 'load_and_validate_config'), \
+             patch.object(MeshHub, 'setup_logging'):
+            bot = MeshHub()
+            bot.connection_manager.isConnected = True
+            
+            # Weather module configured with two distinct channels
+            bot.config = {
+                "modules": {
+                    "weather_bot": {
+                        "enabled": True,
+                        "channels": {"alerts": "#weather_alerts", "weather": "#weather"}
+                    }
+                }
+            }
+            bot.module_manager.module_channels = {"weather_bot": {"#weather_alerts", "#weather"}}
+
+            node_channels = [
+                {"channel_idx": 0, "channel_name": "primary"},
+                {"channel_idx": 1, "channel_name": ""},
+                {"channel_idx": 2, "channel_name": ""}
+            ]
+
+            executed_commands = []
+            async def mock_execute(cmd):
+                executed_commands.append(cmd)
+                if cmd == "channels":
+                    return node_channels
+                return {"ok": True}
+
+            bot.connection_manager.execute = AsyncMock(side_effect=mock_execute)
+
+            self.loop.run_until_complete(bot.sync_channels())
+
+            # Both channels must be added
+            self.assertTrue(
+                any(c[0] == "set_channel" and "#weather" in c for c in executed_commands),
+                "Expected #weather to be set"
+            )
+            self.assertTrue(
+                any(c[0] == "set_channel" and "#weather_alerts" in c for c in executed_commands),
+                "Expected #weather_alerts to be set"
+            )
+
+    def test_weather_module_channels_retained_on_node(self):
+        with patch.object(MeshHub, 'load_and_validate_config'), \
+             patch.object(MeshHub, 'setup_logging'):
+            bot = MeshHub()
+            bot.connection_manager.isConnected = True
+            
+            bot.config = {
+                "modules": {
+                    "weather_bot": {
+                        "enabled": True,
+                        "channels": {"alerts": "weather", "weather": "weather"}
+                    }
+                }
+            }
+            bot.module_manager.module_channels = {"weather_bot": {"weather"}}
+
+            # Node already has #weather
+            node_channels = [
+                {"channel_idx": 0, "channel_name": "primary"},
+                {"channel_idx": 1, "channel_name": "#weather"}
+            ]
+
+            executed_commands = []
+            async def mock_execute(cmd):
+                executed_commands.append(cmd)
+                if cmd == "channels":
+                    return node_channels
+                return {"ok": True}
+
+            bot.connection_manager.execute = AsyncMock(side_effect=mock_execute)
+
+            self.loop.run_until_complete(bot.sync_channels())
+
+            # Should not remove #weather and should not re-add
+            self.assertNotIn(["remove_channel", "1"], executed_commands)
+            self.assertNotIn(["set_channel", "1", "#weather"], executed_commands)
+
 if __name__ == '__main__':
     unittest.main()

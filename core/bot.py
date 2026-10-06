@@ -366,6 +366,22 @@ class MeshHub:
                         for c in ch_val:
                             if c is not None:
                                 used.add(c)
+                inst_cfg = getattr(instance, 'config', {}) or {}
+                if isinstance(inst_cfg, dict):
+                    if "channel" in inst_cfg and inst_cfg["channel"] is not None:
+                        used.add(inst_cfg["channel"])
+                    if "channels" in inst_cfg and inst_cfg["channels"] is not None:
+                        c_val = inst_cfg["channels"]
+                        if isinstance(c_val, dict):
+                            for c in c_val.values():
+                                if c is not None:
+                                    used.add(c)
+                        elif isinstance(c_val, (list, set, tuple)):
+                            for c in c_val:
+                                if c is not None:
+                                    used.add(c)
+                        elif isinstance(c_val, (str, int)):
+                            used.add(c_val)
 
         # 2. From config.json modules section (only enabled modules)
         modules_cfg = self.config.get("modules", {}) if hasattr(self, 'config') and self.config else {}
@@ -375,22 +391,21 @@ class MeshHub:
             if not mod_cfg.get("enabled", True):
                 continue
 
-            if "channel" in mod_cfg and mod_cfg["channel"] is not None:
-                used.add(mod_cfg["channel"])
-            if "channels" in mod_cfg and mod_cfg["channels"] is not None:
-                ch_val = mod_cfg["channels"]
-                if isinstance(ch_val, list):
-                    for c in ch_val:
-                        if c is not None:
-                            used.add(c)
-                elif isinstance(ch_val, dict):
-                    for c in ch_val.values():
-                        if c is not None:
-                            used.add(c)
-                elif isinstance(ch_val, (str, int)):
-                    used.add(ch_val)
-            if "logChannel" in mod_cfg and mod_cfg["logChannel"] is not None:
-                used.add(mod_cfg["logChannel"])
+            for k, v in mod_cfg.items():
+                if v is None:
+                    continue
+                k_lower = k.lower()
+                if k_lower in ("channel", "channels", "logchannel", "weatherchannel", "alertschannel", "alertchannel"):
+                    if isinstance(v, dict):
+                        for c in v.values():
+                            if c is not None:
+                                used.add(c)
+                    elif isinstance(v, (list, set, tuple)):
+                        for c in v:
+                            if c is not None:
+                                used.add(c)
+                    elif isinstance(v, (str, int)):
+                        used.add(v)
 
         return used
 
@@ -421,15 +436,19 @@ class MeshHub:
         )
 
         def is_channel_used_by_app(idx, name):
+            name_clean = name.strip().lower()
+            name_no_hash = name_clean.lstrip("#")
             for u in used_channels:
+                if u is None:
+                    continue
                 if isinstance(u, int) and u == idx:
                     return True
                 if isinstance(u, str):
                     if u.isdigit() and int(u) == idx:
                         return True
                     u_clean = u.strip().lower()
-                    name_clean = name.strip().lower()
-                    if u_clean == name_clean or u_clean.lstrip("#") == name_clean.lstrip("#"):
+                    u_no_hash = u_clean.lstrip("#")
+                    if u_clean == name_clean or (u_no_hash and u_no_hash == name_no_hash):
                         return True
             return False
 
@@ -462,10 +481,21 @@ class MeshHub:
         # Distinct list of '#' channels used by the app
         used_hash_channels = []
         for u in used_channels:
-            if isinstance(u, str) and u.strip().startswith("#"):
-                clean_u = u.strip()
-                if not any(clean_u.lower() == existing.lower() for existing in used_hash_channels):
-                    used_hash_channels.append(clean_u)
+            if u is None:
+                continue
+            # Public channel 0 / "public" / "primary" is left alone
+            if u == 0 or str(u).strip() in ("0", "public", "primary", "none", "None", ""):
+                continue
+            # Numeric integer index is not a channel name
+            if isinstance(u, int) or (isinstance(u, str) and u.strip().isdigit()):
+                continue
+
+            # Normalize channel to start with '#'
+            u_str = str(u).strip()
+            hash_name = u_str if u_str.startswith("#") else f"#{u_str}"
+
+            if not any(hash_name.lower() == existing.lower() for existing in used_hash_channels):
+                used_hash_channels.append(hash_name)
 
         for hash_ch in used_hash_channels:
             # Check if hash_ch already exists on the node

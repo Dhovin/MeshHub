@@ -321,7 +321,7 @@ class WeatherBot:
         self.user_agent = "MeshCoreWeatherBot/1.1.0 (contact@example.com)"
         self.zip_code = "20001"
         self.my_position = {"lat": 38.9072, "lon": -77.0369}
-        self.channel_names = {"alerts": "weather", "weather": "weather"}
+        self.channel_names = {"alerts": "#weather", "weather": "#weather"}
         self.timers = {"blitzCollection": 600, "meteoAlerts": 600}
         self.blitz_radius_miles = 10
         self.compas_names = {
@@ -424,12 +424,12 @@ class WeatherBot:
             
         # 3. Channels config
         channels = config.get("channels", {})
-        alerts_ch = channels.get("alerts", "weather")
+        alerts_ch = channels.get("alerts", "#weather")
         val = input(f"Enter Channel Name/Index for weather alerts [current: {alerts_ch}]: ").strip()
         if val:
             channels["alerts"] = val
             
-        weather_ch = channels.get("weather", "weather")
+        weather_ch = channels.get("weather", "#weather")
         val = input(f"Enter Channel Name/Index for daily forecasts [current: {weather_ch}]: ").strip()
         if val:
             channels["weather"] = val
@@ -467,7 +467,22 @@ class WeatherBot:
             self.my_position = config["myPosition"]
             
         if "channels" in config:
-            self.channel_names.update(config["channels"])
+            if isinstance(config["channels"], dict):
+                self.channel_names.update(config["channels"])
+            elif isinstance(config["channels"], (list, set, tuple)):
+                ch_list = list(config["channels"])
+                if len(ch_list) == 1:
+                    self.channel_names["weather"] = ch_list[0]
+                    self.channel_names["alerts"] = ch_list[0]
+                elif len(ch_list) >= 2:
+                    self.channel_names["alerts"] = ch_list[0]
+                    self.channel_names["weather"] = ch_list[1]
+            elif isinstance(config["channels"], str):
+                self.channel_names["weather"] = config["channels"]
+                self.channel_names["alerts"] = config["channels"]
+        if "channel" in config and config["channel"]:
+            self.channel_names["weather"] = config["channel"]
+            self.channel_names["alerts"] = config["channel"]
             
         if "timers" in config:
             t = config["timers"]
@@ -485,11 +500,23 @@ class WeatherBot:
         requested = list(self.channel_names.values())
         api.declare_channels(requested)
 
-        logger.info(f"[{self.name}] Initialized.")
+        logger.info(f"[{self.name}] Initialized with channels: {self.channel_names}")
+
+    @property
+    def channels(self):
+        return list(self.channel_names.values())
 
     async def start(self):
         logger.info(f"[{self.name}] Starting lifecycle tasks...")
         self._is_running = True
+        
+        # 0. Request and resolve channel indices on the node
+        for ch_key, ch_name in list(self.channel_names.items()):
+            if ch_name:
+                try:
+                    await self._get_channel_idx(ch_name)
+                except Exception as e:
+                    logger.error(f"[{self.name}] Failed to request channel '{ch_name}': {e}")
         
         # 1. Resolve configured main zip code
         if self.zip_code:
