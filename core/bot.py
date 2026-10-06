@@ -217,6 +217,12 @@ class MeshHub:
         # 3. Load modules
         await self.module_manager.load_modules(self.modules_dir)
         
+        # 3.5. Synchronize channels between app and node on startup
+        try:
+            await self.sync_channels()
+        except Exception as e:
+            logger.error(f"Error during startup channel synchronization: {e}", exc_info=True)
+
         # 4. Start modules
         await self.module_manager.start_modules()
 
@@ -320,6 +326,193 @@ class MeshHub:
                 await writer.wait_closed()
             except Exception:
                 pass
+
+    def get_used_channels(self):
+        """
+        Determine what channels are being used by the application's enabled modules and configuration.
+        Returns a set containing channel names or indices.
+        """
+        used = set()
+
+        # 1. From loaded modules (ModuleManager tracks enabled modules)
+        if hasattr(self, 'module_manager') and self.module_manager:
+            for mod_name, ch_set in getattr(self.module_manager, 'module_channels', {}).items():
+                for ch in ch_set:
+                    if ch is not None:
+                        used.add(ch)
+
+            for mod_name, instance in getattr(self.module_manager, 'modules', {}).items():
+                if hasattr(instance, 'channel') and getattr(instance, 'channel') is not None:
+                    used.add(getattr(instance, 'channel'))
+                if hasattr(instance, 'channels') and getattr(instance, 'channels') is not None:
+                    ch_val = getattr(instance, 'channels')
+                    if isinstance(ch_val, (list, set, tuple)):
+                        for c in ch_val:
+                            if c is not None:
+                                used.add(c)
+                    elif isinstance(ch_val, dict):
+                        for c in ch_val.values():
+                            if c is not None:
+                                used.add(c)
+                    elif isinstance(ch_val, (str, int)):
+                        used.add(ch_val)
+                if hasattr(instance, 'channel_names') and getattr(instance, 'channel_names') is not None:
+                    ch_val = getattr(instance, 'channel_names')
+                    if isinstance(ch_val, dict):
+                        for c in ch_val.values():
+                            if c is not None:
+                                used.add(c)
+                    elif isinstance(ch_val, (list, set, tuple)):
+                        for c in ch_val:
+                            if c is not None:
+                                used.add(c)
+
+        # 2. From config.json modules section (only enabled modules)
+        modules_cfg = self.config.get("modules", {}) if hasattr(self, 'config') and self.config else {}
+        for mod_name, mod_cfg in modules_cfg.items():
+            if not isinstance(mod_cfg, dict):
+                continue
+            if not mod_cfg.get("enabled", True):
+                continue
+
+            if "channel" in mod_cfg and mod_cfg["channel"] is not None:
+                used.add(mod_cfg["channel"])
+            if "channels" in mod_cfg and mod_cfg["channels"] is not None:
+                ch_val = mod_cfg["channels"]
+                if isinstance(ch_val, list):
+                    for c in ch_val:
+                        if c is not None:
+                            used.add(c)
+                elif isinstance(ch_val, dict):
+                    for c in ch_val.values():
+                        if c is not None:
+                            used.add(c)
+                elif isinstance(ch_val, (str, int)):
+                    used.add(ch_val)
+            if "logChannel" in mod_cfg and mod_cfg["logChannel"] is not None:
+                used.add(mod_cfg["logChannel"])
+
+        return used
+
+    async def sync_channels(self):
+        """
+        Synchronize channels on node startup:
+        - Identify what channels are being used by the app and what channels are on the node.
+        - If a '#' channel is on the node that is not used, remove it.
+        - If a '#' channel is used but not on the node, add it.
+        - Always leave the public channel (channel index 0).
+        """
+        if not self.connection_manager or not self.connection_manager.isConnected:
+            logger.warning("Node not connected; skipping channel synchronization.")
+            return
+
+        used_channels = self.get_used_channels()
+        logger.info(f"Startup channel sync: channels used by app: {list(used_channels)}")
+
+        # Fetch channels currently on the node
+        node_channels = await self.connection_manager.execute("channels")
+        if not isinstance(node_channels, list):
+            logger.error(f"Startup channel sync: failed to fetch channels from node: {node_channels}")
+            return
+
+        logger.info(
+            f"Startup channel sync: channels on node: "
+            f"{[{'idx': c.get('channel_idx'), 'name': c.get('channel_name')} for c in node_channels]}"
+        )
+
+        def is_channel_used_by_app(idx, name):
+            for u in used_channels:
+                if isinstance(u, int) and u == idx:
+                    return True
+                if isinstance(u, str):
+                    if u.isdigit() and int(u) == idx:
+                        return True
+                    u_clean = u.strip().lower()
+                    name_clean = name.strip().lower()
+                    if u_clean == name_clean or u_clean.lstrip("#") == name_clean.lstrip("#"):
+                        return True
+            return False
+
+        # 1. Remove '#' channels on the node that are not used by the app
+        for ch in list(node_channels):
+            idx = ch.get("channel_idx")
+            name = str(ch.get("channel_name", "")).strip()
+
+            # Always leave the public channel (channel 0)
+            if idx == 0:
+                continue
+            if name.lower() in ("public", "primary"):
+                continue
+
+            # Only '#' channels are removed if unused
+            if not name.startswith("#"):
+                continue
+
+            if not is_channel_used_by_app(idx, name):
+                logger.info(f"Startup channel sync: removing unused '#' channel '{name}' at slot {idx}")
+                res = await self.connection_manager.execute(["remove_channel", str(idx)])
+                if isinstance(res, dict) and "error" in res:
+                    logger.error(f"Startup channel sync: failed to remove channel slot {idx} ('{name}'): {res['error']}")
+                else:
+                    logger.info(f"Startup channel sync: removed channel slot {idx} ('{name}')")
+                    ch["channel_name"] = ""
+                    ch["channel_secret"] = 16 * "00"
+
+        # 2. Add '#' channels that are used by the app but not on the node
+        # Distinct list of '#' channels used by the app
+        used_hash_channels = []
+        for u in used_channels:
+            if isinstance(u, str) and u.strip().startswith("#"):
+                clean_u = u.strip()
+                if not any(clean_u.lower() == existing.lower() for existing in used_hash_channels):
+                    used_hash_channels.append(clean_u)
+
+        for hash_ch in used_hash_channels:
+            # Check if hash_ch already exists on the node
+            exists_on_node = False
+            for ch in node_channels:
+                ch_name = str(ch.get("channel_name", "")).strip()
+                if not ch_name:
+                    continue
+                if ch_name.lower() == hash_ch.lower() or ch_name.lstrip("#").lower() == hash_ch.lstrip("#").lower():
+                    exists_on_node = True
+                    break
+
+            if not exists_on_node:
+                # Find the first available empty slot (never slot 0)
+                empty_slot = None
+                for ch in node_channels:
+                    if ch.get("channel_idx") != 0 and not str(ch.get("channel_name", "")).strip():
+                        empty_slot = ch.get("channel_idx")
+                        break
+
+                if empty_slot is None:
+                    existing_indices = [ch.get("channel_idx", 0) for ch in node_channels if ch]
+                    empty_slot = max(existing_indices) + 1 if existing_indices else 1
+
+                logger.info(f"Startup channel sync: adding '#' channel '{hash_ch}' to node at slot {empty_slot}")
+                res = await self.connection_manager.execute(["set_channel", str(empty_slot), hash_ch])
+                if isinstance(res, dict) and "error" in res:
+                    logger.error(f"Startup channel sync: failed to add channel '{hash_ch}' at slot {empty_slot}: {res['error']}")
+                else:
+                    logger.info(f"Startup channel sync: added channel '{hash_ch}' at slot {empty_slot}")
+                    # Update local tracking of node channels
+                    updated = False
+                    for ch in node_channels:
+                        if ch.get("channel_idx") == empty_slot:
+                            ch["channel_name"] = hash_ch
+                            updated = True
+                            break
+                    if not updated:
+                        node_channels.append({"channel_idx": empty_slot, "channel_name": hash_ch})
+
+                    # Also register slot with module_manager's declared channels for any module using this channel
+                    if hasattr(self, 'module_manager') and self.module_manager:
+                        for mod_name, mod_instance in self.module_manager.modules.items():
+                            mod_chans = self.module_manager.module_channels.get(mod_name, set())
+                            if hash_ch in mod_chans or any(str(c).strip().lower() == hash_ch.lower() for c in mod_chans):
+                                mod_chans.add(empty_slot)
+                                mod_chans.add(str(empty_slot))
 
 # Backward-compatibility alias
 MeshBot = MeshHub

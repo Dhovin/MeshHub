@@ -543,6 +543,9 @@ class ConnectionManager:
                         info["channel_secret"] = info["channel_secret"].hex()
                     if hasattr(self.mc, 'channels') and nb < len(self.mc.channels):
                         self.mc.channels[nb] = info
+                else:
+                    if hasattr(self.mc, 'channels') and nb < len(self.mc.channels):
+                        self.mc.channels[nb] = {"channel_idx": nb, "channel_name": "", "channel_secret": 16 * "00"}
                 return {"ok": f"channel {nb} removed"}
             elif cmd == "scope":
                 if len(cmds) < 2:

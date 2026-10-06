@@ -137,13 +137,13 @@ class ModuleAPI:
         # 3. Channel does not exist, find first empty channel slot
         empty_idx = None
         for ch in channels:
-            if ch and ch.get("channel_name") == "":
+            if ch and ch.get("channel_name") == "" and ch.get("channel_idx", 0) != 0:
                 empty_idx = ch.get("channel_idx")
                 break
                 
         if empty_idx is None:
-            logger.error(f"No available empty channel slot to add '{channel_name}'")
-            return 0
+            existing_indices = [ch.get("channel_idx", 0) for ch in channels if ch]
+            empty_idx = max(existing_indices) + 1 if existing_indices else 1
             
         # 4. Add/set the channel at the empty slot index
         logger.info(f"Channel '{channel_name}' requested by module '{self.module_name}' does not exist. Adding it at index {empty_idx}...")
