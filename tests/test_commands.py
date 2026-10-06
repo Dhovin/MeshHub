@@ -216,6 +216,26 @@ class TestConnectionManagerCommands(unittest.TestCase):
             ]
             res = loop.run_until_complete(self.cm.execute("remove_channel 1"))
             self.assertEqual(res, {"ok": "channel 1 removed"})
+
+            # add_channel without key (hash channel fills empty slot 1)
+            self.cm.mc.commands.set_channel.reset_mock()
+            self.cm.mc.commands.get_channel.reset_mock()
+            self.cm.mc.commands.get_channel.side_effect = [
+                self.mock_event(EventType.CHANNEL_INFO, {"channel_idx": 1, "channel_name": "#wx", "channel_secret": b"\x02"*16})
+            ]
+            res = loop.run_until_complete(self.cm.execute("add_channel #wx"))
+            self.assertEqual(res["channel_name"], "#wx")
+            self.cm.mc.commands.set_channel.assert_called_with(1, "#wx", None)
+
+            # set_channel 2 #wx without key
+            self.cm.mc.commands.set_channel.reset_mock()
+            self.cm.mc.commands.get_channel.reset_mock()
+            self.cm.mc.commands.get_channel.side_effect = [
+                self.mock_event(EventType.CHANNEL_INFO, {"channel_idx": 2, "channel_name": "#wx", "channel_secret": b"\x02"*16})
+            ]
+            res = loop.run_until_complete(self.cm.execute("set_channel 2 #wx"))
+            self.assertEqual(res["channel_name"], "#wx")
+            self.cm.mc.commands.set_channel.assert_called_with(2, "#wx", None)
         finally:
             loop.close()
 

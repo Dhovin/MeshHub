@@ -68,8 +68,8 @@
       "weatherAlarm": "06:00",
       "zipCode": "76246",
       "channels": {
-        "alerts": "#weather",
-        "weather": "#weather"
+        "alerts": "#wx",
+        "weather": "#wx"
       },
       "timers": {
         "blitzCollection": 600000,

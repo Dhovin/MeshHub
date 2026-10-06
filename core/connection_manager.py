@@ -252,6 +252,11 @@ class ConnectionManager:
                             self.bot.module_manager.is_channel_allowed(active_module, new_name)):
                         is_allowed = False
                         denied_channel = f"{slot_or_name} -> {new_name}"
+                elif cmd == "set_channel" and len(cmds) == 2:
+                    new_name = cmds[1]
+                    if not self.bot.module_manager.is_channel_allowed(active_module, new_name):
+                        is_allowed = False
+                        denied_channel = new_name
                 elif cmd == "add_channel" and len(cmds) > 1:
                     new_name = cmds[1]
                     if not self.bot.module_manager.is_channel_allowed(active_module, new_name):
@@ -483,27 +488,92 @@ class ConnectionManager:
                 if "channel_secret" in info and isinstance(info["channel_secret"], bytes):
                     info["channel_secret"] = info["channel_secret"].hex()
                 return info
-            elif cmd in ("set_channel", "add_channel"):
-                if len(cmds) < 3:
-                    return {"error": "Usage: set_channel <idx_or_name> <name> [key_hex]"}
-                chan_arg = cmds[1]
-                name_arg = cmds[2]
+            elif cmd == "add_channel":
+                if len(cmds) < 2:
+                    return {"error": "Usage: add_channel <name> [key_hex]"}
+                name_arg = cmds[1]
                 key_arg = None
-                if len(cmds) > 3:
+                if len(cmds) > 2:
                     try:
-                        key_arg = bytes.fromhex(cmds[3])
+                        key_arg = bytes.fromhex(cmds[2])
                     except ValueError:
                         return {"error": "Key must be a valid hex string"}
-                if chan_arg.isdigit():
-                    nb = int(chan_arg)
-                else:
+                # Find the first available empty slot (never slot 0)
+                if not hasattr(self.mc, 'channels') or not self.mc.channels:
+                    await self.execute("channels")
+                channels = getattr(self.mc, 'channels', []) or []
+                empty_slot = None
+                for ch in channels:
+                    if ch and ch.get("channel_idx", 0) != 0 and not str(ch.get("channel_name", "")).strip():
+                        empty_slot = ch.get("channel_idx")
+                        break
+                if empty_slot is None:
+                    existing_indices = [ch.get("channel_idx", 0) for ch in channels if ch]
+                    empty_slot = max(existing_indices) + 1 if existing_indices else 1
+                nb = empty_slot
+
+                res = await self.mc.commands.set_channel(nb, name_arg, key_arg)
+                if res.type == EventType.ERROR:
+                    return {"error": f"Failed to add channel: {res}"}
+                res_info = await self.mc.commands.get_channel(nb)
+                if res_info.type == EventType.ERROR:
+                    return {"error": f"Failed to retrieve updated channel info: {res_info}"}
+                info = dict(res_info.payload)
+                if "channel_secret" in info and isinstance(info["channel_secret"], bytes):
+                    info["channel_secret"] = info["channel_secret"].hex()
+                if not hasattr(self.mc, 'channels'):
+                    self.mc.channels = []
+                while len(self.mc.channels) <= nb:
+                    self.mc.channels.append({})
+                self.mc.channels[nb] = info
+                return info
+            elif cmd == "set_channel":
+                if len(cmds) < 2:
+                    return {"error": "Usage: set_channel <idx_or_name> [name] [key_hex]"}
+                if len(cmds) == 2:
+                    # set_channel <name> (e.g. set_channel #wx)
+                    first_arg = cmds[1]
+                    if first_arg.isdigit():
+                        return {"error": "Usage: set_channel <idx> <name> [key_hex]"}
+                    name_arg = first_arg
+                    key_arg = None
                     if not hasattr(self.mc, 'channels') or not self.mc.channels:
                         await self.execute("channels")
-                    chan = self._get_channel_by_name(chan_arg)
-                    if not chan:
-                        nb = len(getattr(self.mc, 'channels', []))
-                    else:
+                    chan = self._get_channel_by_name(name_arg)
+                    if chan:
                         nb = chan.get("channel_idx", 0)
+                    else:
+                        channels = getattr(self.mc, 'channels', []) or []
+                        empty_slot = None
+                        for ch in channels:
+                            if ch and ch.get("channel_idx", 0) != 0 and not str(ch.get("channel_name", "")).strip():
+                                empty_slot = ch.get("channel_idx")
+                                break
+                        if empty_slot is None:
+                            existing_indices = [ch.get("channel_idx", 0) for ch in channels if ch]
+                            empty_slot = max(existing_indices) + 1 if existing_indices else 1
+                        nb = empty_slot
+                else:
+                    # set_channel <idx_or_name> <name> [key_hex]
+                    chan_arg = cmds[1]
+                    name_arg = cmds[2]
+                    key_arg = None
+                    if len(cmds) > 3:
+                        try:
+                            key_arg = bytes.fromhex(cmds[3])
+                        except ValueError:
+                            return {"error": "Key must be a valid hex string"}
+                    if chan_arg.isdigit():
+                        nb = int(chan_arg)
+                    else:
+                        if not hasattr(self.mc, 'channels') or not self.mc.channels:
+                            await self.execute("channels")
+                        chan = self._get_channel_by_name(chan_arg)
+                        if not chan:
+                            nb = len(getattr(self.mc, 'channels', []))
+                        else:
+                            nb = chan.get("channel_idx", 0)
+
                 res = await self.mc.commands.set_channel(nb, name_arg, key_arg)
                 if res.type == EventType.ERROR:
                     return {"error": f"Failed to set channel: {res}"}

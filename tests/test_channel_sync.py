@@ -406,5 +406,54 @@ class TestStartupChannelSync(unittest.TestCase):
             self.assertNotIn(["remove_channel", "1"], executed_commands)
             self.assertNotIn(["set_channel", "1", "#weather"], executed_commands)
 
+    def test_weather_module_with_wx_channel_synced_and_obsolete_weather_removed(self):
+        with patch.object(MeshHub, 'load_and_validate_config'), \
+             patch.object(MeshHub, 'setup_logging'):
+            bot = MeshHub()
+            bot.connection_manager.isConnected = True
+            
+            # Weather module configured with #wx because user changed #weather to #wx
+            bot.config = {
+                "modules": {
+                    "weather_bot": {
+                        "enabled": True,
+                        "channels": {"alerts": "#wx", "weather": "#wx"}
+                    }
+                }
+            }
+            bot.module_manager.module_channels = {"weather_bot": {"#wx"}}
+
+            # Node currently has #weather on slot 2, but app uses #wx now
+            node_channels = [
+                {"channel_idx": 0, "channel_name": "primary"},
+                {"channel_idx": 1, "channel_name": ""},
+                {"channel_idx": 2, "channel_name": "#weather"}
+            ]
+
+            executed_commands = []
+            async def mock_execute(cmd):
+                executed_commands.append(cmd)
+                if cmd == "channels":
+                    return node_channels
+                return {"ok": True}
+
+            bot.connection_manager.execute = AsyncMock(side_effect=mock_execute)
+
+            self.loop.run_until_complete(bot.sync_channels())
+
+            # Slot 2 (#weather) must be removed because app no longer uses #weather
+            self.assertIn(["remove_channel", "2"], executed_commands)
+            # Slot 1 must be set to #wx (keyless hash channel)
+            self.assertIn(["set_channel", "1", "#wx"], executed_commands)
+            # Slot 0 must not be touched
+            self.assertNotIn(["remove_channel", "0"], executed_commands)
+
+    def test_weather_module_default_channels_use_wx(self):
+        from modules.weather_bot import WeatherBot
+        wbot = WeatherBot()
+        self.assertEqual(wbot.channel_names.get("weather"), "#wx")
+        self.assertEqual(wbot.channel_names.get("alerts"), "#wx")
+        self.assertIn("#wx", wbot.channels)
+
 if __name__ == '__main__':
     unittest.main()

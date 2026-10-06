@@ -321,7 +321,7 @@ class WeatherBot:
         self.user_agent = "MeshCoreWeatherBot/1.1.0 (contact@example.com)"
         self.zip_code = "20001"
         self.my_position = {"lat": 38.9072, "lon": -77.0369}
-        self.channel_names = {"alerts": "#weather", "weather": "#weather"}
+        self.channel_names = {"alerts": "#wx", "weather": "#wx"}
         self.timers = {"blitzCollection": 600, "meteoAlerts": 600}
         self.blitz_radius_miles = 10
         self.compas_names = {
@@ -424,12 +424,12 @@ class WeatherBot:
             
         # 3. Channels config
         channels = config.get("channels", {})
-        alerts_ch = channels.get("alerts", "#weather")
+        alerts_ch = channels.get("alerts", "#wx")
         val = input(f"Enter Channel Name/Index for weather alerts [current: {alerts_ch}]: ").strip()
         if val:
             channels["alerts"] = val
             
-        weather_ch = channels.get("weather", "#weather")
+        weather_ch = channels.get("weather", "#wx")
         val = input(f"Enter Channel Name/Index for daily forecasts [current: {weather_ch}]: ").strip()
         if val:
             channels["weather"] = val
@@ -740,10 +740,18 @@ class WeatherBot:
         if not zipcode:
             return
             
-        # If we are on channel, ensure it matches weather channel index
-        weather_channel_name = self.channel_names.get("weather", "weather")
+        # If we are on channel, ensure it matches weather channel index or aliases
         if not is_dm:
-            is_weather_channel = await self.api.matches_channel(channel, weather_channel_name)
+            is_weather_channel = False
+            for ch_name in self.channel_names.values():
+                if ch_name and await self.api.matches_channel(channel, ch_name):
+                    is_weather_channel = True
+                    break
+            if not is_weather_channel:
+                for alias in ("#wx", "#weather", "wx", "weather"):
+                    if await self.api.matches_channel(channel, alias):
+                        is_weather_channel = True
+                        break
             if not is_weather_channel:
                 return
                 

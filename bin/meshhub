@@ -1095,8 +1095,8 @@ def print_cli_options():
     print("  Channels:")
     print("    channels, -chans                    - Print active channel slots")
     print("    get_channel <idx_or_nm>             - Print specific channel slot details")
-    print("    set_channel <idx_or_nm> <nm> [k]    - Set/add channel info (nb, name, key_hex)")
-    print("    add_channel <name> [key_hex]        - Add a new channel")
+    print("    set_channel <idx_or_nm> [nm] [k]    - Set/add channel info (hash channels do not need a key)")
+    print("    add_channel <name> [key_hex]        - Add a new channel (hash channels do not need a key)")
     print("    remove_channel <idx_or_name>        - Remove channel (by index or name)")
     print("    scope <s>                           - Set flood scope")
     print()
@@ -1201,9 +1201,9 @@ def run_cli_cmd(cmds):
             print_cli_options()
             return
     elif cmd_name == "set_channel":
-        if len(cmds) < 3:
+        if len(cmds) < 2:
             print("Error: Missing arguments for set_channel command.")
-            print("Usage: MeshHub cli set_channel <idx_or_name> <name> [key_hex]")
+            print("Usage: MeshHub cli set_channel <idx_or_name> [name] [key_hex]")
             print()
             print_cli_options()
             return
