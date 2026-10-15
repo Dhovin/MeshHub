@@ -1095,9 +1095,9 @@ def print_cli_options():
     print("  Channels & Data:")
     print("    channels, -chans                    - Print active channel slots")
     print("    get_channel <idx_or_nm>             - Print specific channel slot details")
-    print("    set_channel <idx_or_nm> [nm] [k]    - Set/add channel info (hash channels do not need a key)")
-    print("    add_channel <name> [key_hex]        - Add a new channel (hash channels do not need a key)")
-    print("    remove_channel <idx_or_name>        - Remove channel (by index or name)")
+    print("    set_channel <idx_or_nm> [nm] [k]    - Set/add channel info (quote '#name' in bash/zsh)")
+    print("    add_channel <name> [key_hex]        - Add a new channel (quote '#name' in bash/zsh; no key needed)")
+    print("    remove_channel <idx_or_name>        - Remove channel (quote '#name' in bash/zsh)")
     print("    chan_data <chan> <type> <hex>       - Send channel data packet")
     print("    scope <s>                           - Set flood scope")
     print()
@@ -1211,6 +1211,7 @@ def run_cli_cmd(cmds):
         if len(cmds) < 3:
             print("Error: Missing arguments for chan command.")
             print("Usage: MeshHub cli chan <channel_idx_or_name> <message>")
+            print("Note: In bash/zsh, quote hash channels (e.g. '#wx' or \"#wx\") so '#' is not treated as a shell comment.")
             print()
             print_cli_options()
             return
@@ -1253,6 +1254,7 @@ def run_cli_cmd(cmds):
         if len(cmds) < 2:
             print("Error: Missing arguments for set_channel command.")
             print("Usage: MeshHub cli set_channel <idx_or_name> [name] [key_hex]")
+            print("Note: In bash/zsh, quote hash channels (e.g. '#wx' or \"#wx\") so '#' is not treated as a shell comment.")
             print()
             print_cli_options()
             return
@@ -1260,6 +1262,7 @@ def run_cli_cmd(cmds):
         if len(cmds) < 2:
             print("Error: Missing arguments for add_channel command.")
             print("Usage: MeshHub cli add_channel <name> [key_hex]")
+            print("Note: In bash/zsh, quote hash channels (e.g. '#wx' or \"#wx\") so '#' is not treated as a shell comment.")
             print()
             print_cli_options()
             return
@@ -1267,6 +1270,7 @@ def run_cli_cmd(cmds):
         if len(cmds) < 2:
             print("Error: Missing arguments for remove_channel command.")
             print("Usage: MeshHub cli remove_channel <idx_or_name>")
+            print("Note: In bash/zsh, quote hash channels (e.g. '#wx' or \"#wx\") so '#' is not treated as a shell comment.")
             print()
             print_cli_options()
             return

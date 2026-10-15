@@ -21,9 +21,13 @@ class MeshwarsBot:
                 "time": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
                 "duration": {"type": "number", "minimum": 0.1},
                 "opening_message": {"type": "string"},
+                "hourly_message": {"type": "string"},
                 "halfway_message": {"type": "string"},
                 "final_hour_message": {"type": "string"},
                 "closing_message": {"type": "string"},
+                "checkin_keyword": {"type": "string"},
+                "checkin_ack_template": {"type": "string"},
+                "enable_hourly_message": {"type": "boolean"},
                 "enable_reminders": {"type": "boolean"},
                 "enable_mid_net_updates": {"type": "boolean"},
                 "state_file": {"type": "string"},
@@ -33,25 +37,31 @@ class MeshwarsBot:
         }
         
         self.channel = "#meshwars"
-        self.day_of_week = "Tuesday"
+        self.day_of_week = "Saturday"
         self.time = "18:00"
         self.duration = 6.0
         self.opening_message = (
-            "Welcome to the MeshWars net! Make sure to register on https://meshwars.com "
-            "and send any message in this chat. This net runs every tuesday from 6pm to midnight."
+            "Welcome to the MeshWars net! Runs every Saturday from 6pm to midnight. "
+            "Send !checkin or any chat message to participate."
+        )
+        self.hourly_message = (
+            "Register on https://meshwars.com and any message sent in this chat counts toward your bonus points."
         )
         self.halfway_message = (
             "MeshWars Net Update: We are halfway through tonight's net! "
-            "{count} {user_str} checked in so far. Register on https://meshwars.com and send any message in this chat."
+            "{count} {user_str} checked in so far."
         )
         self.final_hour_message = (
             "MeshWars Net Update: 1 hour remaining in tonight's net! "
-            "{count} {user_str} checked in so far. Register on https://meshwars.com and send any message in this chat."
+            "{count} {user_str} checked in so far."
         )
         self.closing_message = (
             "The MeshWars net has concluded. Thank you for participating! "
             "{count} {user_str} checked in today."
         )
+        self.checkin_keyword = "!checkin"
+        self.checkin_ack_template = "Welcome {sender}, {count} {user_str} {have_str} checked in."
+        self.enable_hourly_message = True
         self.enable_reminders = True
         self.enable_mid_net_updates = True
         self.state_file = "meshwars_state.json"
@@ -66,6 +76,7 @@ class MeshwarsBot:
         self.net_end_task = None
         self.halfway_task = None
         self.final_hour_task = None
+        self.hourly_tasks = []
         
         # Active session state
         self.is_active = False
@@ -73,6 +84,7 @@ class MeshwarsBot:
         self.checkins = []
         self.halfway_sent = False
         self.final_hour_sent = False
+        self.hourly_sent = []
         self.channel_idx = 0
 
     def run_config(self, current_config):
@@ -101,7 +113,7 @@ class MeshwarsBot:
             config["channel"] = current_channel
             
         # 3. Day of week
-        current_dow = config.get("day_of_week", "Tuesday")
+        current_dow = config.get("day_of_week", self.day_of_week)
         val = input(f"Enter Day of the week for the Net [current: {current_dow}]: ").strip()
         if val:
             config["day_of_week"] = val.capitalize()
@@ -137,7 +149,15 @@ class MeshwarsBot:
         elif "opening_message" not in config:
             config["opening_message"] = current_open_msg
 
-        # 7. Halfway Message
+        # 7. Hourly Message
+        current_hourly_msg = config.get("hourly_message", self.hourly_message)
+        val = input(f"Enter Hourly Message [current: {current_hourly_msg}]: ").strip()
+        if val:
+            config["hourly_message"] = val
+        elif "hourly_message" not in config:
+            config["hourly_message"] = current_hourly_msg
+
+        # 8. Halfway Message
         current_half_msg = config.get("halfway_message", self.halfway_message)
         val = input(f"Enter Halfway Message [current: {current_half_msg}]: ").strip()
         if val:
@@ -145,7 +165,7 @@ class MeshwarsBot:
         elif "halfway_message" not in config:
             config["halfway_message"] = current_half_msg
 
-        # 8. Final Hour Message
+        # 9. Final Hour Message
         current_final_msg = config.get("final_hour_message", self.final_hour_message)
         val = input(f"Enter 1-Hour Remaining Message [current: {current_final_msg}]: ").strip()
         if val:
@@ -153,7 +173,7 @@ class MeshwarsBot:
         elif "final_hour_message" not in config:
             config["final_hour_message"] = current_final_msg
 
-        # 9. Closing Message
+        # 10. Closing Message
         current_close_msg = config.get("closing_message", self.closing_message)
         val = input(f"Enter Closing Message [current: {current_close_msg}]: ").strip()
         if val:
@@ -161,7 +181,7 @@ class MeshwarsBot:
         elif "closing_message" not in config:
             config["closing_message"] = current_close_msg
 
-        # 10. Enable Reminders
+        # 11. Enable Reminders
         current_reminders = config.get("enable_reminders", True)
         val = input(f"Enable Reminders (1pm & 30m prior)? (y/n) [current: {'y' if current_reminders else 'n'}]: ").strip().lower()
         if val:
@@ -169,7 +189,15 @@ class MeshwarsBot:
         elif "enable_reminders" not in config:
             config["enable_reminders"] = current_reminders
 
-        # 11. Enable Mid-net Updates
+        # 12. Enable Hourly Bonus Broadcast
+        current_enable_hourly = config.get("enable_hourly_message", True)
+        val = input(f"Enable Hourly Bonus Broadcast? (y/n) [current: {'y' if current_enable_hourly else 'n'}]: ").strip().lower()
+        if val:
+            config["enable_hourly_message"] = val in ("y", "yes", "true", "1")
+        elif "enable_hourly_message" not in config:
+            config["enable_hourly_message"] = current_enable_hourly
+
+        # 13. Enable Mid-net Updates
         current_mid_updates = config.get("enable_mid_net_updates", True)
         val = input(f"Enable Halfway & 1-Hour Updates? (y/n) [current: {'y' if current_mid_updates else 'n'}]: ").strip().lower()
         if val:
@@ -177,7 +205,7 @@ class MeshwarsBot:
         elif "enable_mid_net_updates" not in config:
             config["enable_mid_net_updates"] = current_mid_updates
 
-        # 12. State file
+        # 14. State file
         current_state_file = config.get("state_file", "meshwars_state.json")
         val = input(f"Enter State File Name [current: {current_state_file}]: ").strip()
         if val:
@@ -185,7 +213,7 @@ class MeshwarsBot:
         elif "state_file" not in config:
             config["state_file"] = current_state_file
 
-        # 13. Timezone
+        # 15. Timezone
         current_tz = config.get("timezone", "America/Chicago")
         val = input(f"Enter Timezone (e.g. America/Chicago, America/New_York) [current: {current_tz}]: ").strip()
         if val:
@@ -199,7 +227,7 @@ class MeshwarsBot:
         self.api = api
         self.config = config
         self.channel = config.get("channel", "#meshwars")
-        self.day_of_week = config.get("day_of_week", "Tuesday")
+        self.day_of_week = config.get("day_of_week", "Saturday")
         self.time = config.get("time", "18:00")
         try:
             self.duration = float(config.get("duration", config.get("duration_hours", 6.0)))
@@ -207,9 +235,13 @@ class MeshwarsBot:
             self.duration = 6.0
             
         self.opening_message = config.get("opening_message", self.opening_message)
+        self.hourly_message = config.get("hourly_message", self.hourly_message)
         self.halfway_message = config.get("halfway_message", self.halfway_message)
         self.final_hour_message = config.get("final_hour_message", self.final_hour_message)
         self.closing_message = config.get("closing_message", self.closing_message)
+        self.checkin_keyword = config.get("checkin_keyword", "!checkin")
+        self.checkin_ack_template = config.get("checkin_ack_template", "Welcome {sender}, {count} {user_str} {have_str} checked in.")
+        self.enable_hourly_message = config.get("enable_hourly_message", True)
         self.enable_reminders = config.get("enable_reminders", True)
         self.enable_mid_net_updates = config.get("enable_mid_net_updates", True)
         self.state_file = config.get("state_file", "meshwars_state.json")
@@ -268,6 +300,7 @@ class MeshwarsBot:
                     logger.info(f"[{self.name}] Resuming active MeshWars Net started at {self.net_start_time}. Remaining time: {remaining:.1f}s")
                     self.net_end_task = asyncio.create_task(self._wait_and_end_net(remaining))
                     self._schedule_mid_net_updates(duration_seconds, elapsed=elapsed)
+                    self._schedule_hourly_messages(duration_seconds, elapsed=elapsed)
                 else:
                     logger.info(f"[{self.name}] Active MeshWars Net from state file has expired (elapsed: {elapsed:.1f}s). Ending it.")
                     await self._end_net()
@@ -277,6 +310,7 @@ class MeshwarsBot:
                 self.checkins = []
                 self.halfway_sent = False
                 self.final_hour_sent = False
+                self.hourly_sent = []
                 self._save_state()
 
     def stop(self):
@@ -306,6 +340,11 @@ class MeshwarsBot:
         if self.final_hour_task:
             self.final_hour_task.cancel()
             self.final_hour_task = None
+            
+        if self.hourly_tasks:
+            for task in self.hourly_tasks:
+                task.cancel()
+            self.hourly_tasks = []
             
         logger.info(f"[{self.name}] Stopped successfully.")
 
@@ -349,6 +388,7 @@ class MeshwarsBot:
             self.checkins = []
             self.halfway_sent = False
             self.final_hour_sent = False
+            self.hourly_sent = []
             return
             
         try:
@@ -359,7 +399,8 @@ class MeshwarsBot:
                 self.checkins = data.get("checkins", [])
                 self.halfway_sent = data.get("halfway_sent", False)
                 self.final_hour_sent = data.get("final_hour_sent", False)
-                logger.info(f"[{self.name}] Loaded state: is_active={self.is_active}, checkins_count={len(self.checkins)}, halfway_sent={self.halfway_sent}, final_hour_sent={self.final_hour_sent}")
+                self.hourly_sent = data.get("hourly_sent", [])
+                logger.info(f"[{self.name}] Loaded state: is_active={self.is_active}, checkins_count={len(self.checkins)}, halfway_sent={self.halfway_sent}, final_hour_sent={self.final_hour_sent}, hourly_sent={self.hourly_sent}")
         except Exception as e:
             logger.error(f"[{self.name}] Failed to load state from {self.state_file_path}: {e}")
             self.is_active = False
@@ -367,6 +408,7 @@ class MeshwarsBot:
             self.checkins = []
             self.halfway_sent = False
             self.final_hour_sent = False
+            self.hourly_sent = []
 
     def _save_state(self):
         try:
@@ -375,7 +417,8 @@ class MeshwarsBot:
                 "net_start_time": self.net_start_time,
                 "checkins": self.checkins,
                 "halfway_sent": self.halfway_sent,
-                "final_hour_sent": self.final_hour_sent
+                "final_hour_sent": self.final_hour_sent,
+                "hourly_sent": self.hourly_sent
             }
             with open(self.state_file_path, 'w') as f:
                 json.dump(data, f, indent=2)
@@ -388,6 +431,7 @@ class MeshwarsBot:
             
         sender = data.get("sender", "unknown")
         channel = data.get("channel")
+        text = data.get("text", "")
         
         # Don't record messages from ourselves
         if self.api.is_self(sender):
@@ -399,26 +443,104 @@ class MeshwarsBot:
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._handle_message_async(sender, channel))
+            loop.create_task(self._handle_message_async(sender, text, channel))
         except RuntimeError:
             pass
 
-    async def _handle_message_async(self, sender, channel):
+    async def _handle_message_async(self, sender, text, channel):
         if not await self.api.matches_channel(channel, self.channel):
             return
             
+        is_explicit_checkin = (
+            bool(self.checkin_keyword)
+            and self.checkin_keyword.lower() in text.lower()
+        )
+
         # Deduplicate participants
         if sender in self.checkins:
+            if is_explicit_checkin:
+                logger.debug(f"[{self.name}] User '{sender}' already checked in. Ignoring duplicate {self.checkin_keyword}.")
             return
             
-        # Silently record the participant without sending any reply message
+        # Record the participant
         self.checkins.append(sender)
         self._save_state()
-        logger.info(f"[{self.name}] Recorded MeshWars participant: {sender} (total: {len(self.checkins)})")
+
+        if is_explicit_checkin:
+            count = len(self.checkins)
+            user_str = "user" if count == 1 else "users"
+            have_str = "has" if count == 1 else "have"
+            try:
+                ack_msg = self.checkin_ack_template.format(
+                    sender=sender,
+                    count=count,
+                    user_str=user_str,
+                    have_str=have_str,
+                    channel=self.channel
+                )
+            except Exception:
+                ack_msg = f"Welcome {sender}, {count} {user_str} {have_str} checked in."
+            logger.info(f"[{self.name}] Explicit check-in from {sender}. Total: {count}. Sending ACK broadcast.")
+            await self._send_broadcast(ack_msg)
+        else:
+            # Silently record without sending any reply message over RF
+            logger.info(f"[{self.name}] Silently recorded MeshWars participant: {sender} (total: {len(self.checkins)})")
 
     async def _send_broadcast(self, text):
         res = await self.api.bot.connection_manager.execute(["chan", str(self.channel_idx), text])
         logger.debug(f"[{self.name}] Broadcast message response: {res}")
+
+    def _schedule_hourly_messages(self, total_duration_seconds, elapsed=0.0):
+        if self.hourly_tasks:
+            for task in self.hourly_tasks:
+                task.cancel()
+            self.hourly_tasks = []
+
+        if not self.enable_hourly_message or not self.hourly_message:
+            return
+
+        halfway_target = total_duration_seconds / 2.0
+        final_hour_target = total_duration_seconds - 3600.0
+
+        max_hours = int(total_duration_seconds // 3600)
+        # Avoid firing at the very end of the net if duration is exact integer hours
+        if total_duration_seconds % 3600 == 0:
+            max_hours -= 1
+
+        for hour_num in range(1, max_hours + 1):
+            if hour_num in self.hourly_sent:
+                continue
+
+            target_seconds = hour_num * 3600.0
+            delay = target_seconds - elapsed
+
+            # Stagger slightly if coinciding with halfway or final hour updates
+            if self.enable_mid_net_updates:
+                if abs(target_seconds - halfway_target) < 1.0:
+                    delay += 20.0
+                elif final_hour_target > halfway_target and abs(target_seconds - final_hour_target) < 1.0:
+                    delay += 20.0
+
+            if delay > 0:
+                task = asyncio.create_task(self._wait_and_send_hourly(hour_num, delay))
+                self.hourly_tasks.append(task)
+
+    async def _wait_and_send_hourly(self, hour_num, delay):
+        try:
+            await asyncio.sleep(delay)
+            await self._send_hourly_update(hour_num)
+        except asyncio.CancelledError:
+            logger.debug(f"[{self.name}] Hourly update {hour_num} timer cancelled.")
+
+    async def _send_hourly_update(self, hour_num):
+        if not self.is_active:
+            return
+        logger.info(f"[{self.name}] Sending hourly bonus announcement #{hour_num}.")
+        if self.hourly_message:
+            await self._send_broadcast(self.hourly_message)
+        if hour_num not in self.hourly_sent:
+            self.hourly_sent.append(hour_num)
+        self._save_state()
 
     def _schedule_mid_net_updates(self, total_duration_seconds, elapsed=0.0):
         if self.halfway_task:
@@ -507,6 +629,7 @@ class MeshwarsBot:
         self.checkins = []
         self.halfway_sent = False
         self.final_hour_sent = False
+        self.hourly_sent = []
         self._save_state()
         
         if self.opening_message:
@@ -517,6 +640,7 @@ class MeshwarsBot:
         total_seconds = self.duration * 3600
         self.net_end_task = asyncio.create_task(self._wait_and_end_net(total_seconds))
         self._schedule_mid_net_updates(total_seconds, elapsed=0.0)
+        self._schedule_hourly_messages(total_seconds, elapsed=0.0)
 
     async def _on_1pm_reminder(self):
         logger.info(f"[{self.name}] 1 PM reminder triggered.")
@@ -559,9 +683,14 @@ class MeshwarsBot:
         if self.final_hour_task:
             self.final_hour_task.cancel()
             self.final_hour_task = None
+        if self.hourly_tasks:
+            for task in self.hourly_tasks:
+                task.cancel()
+            self.hourly_tasks = []
             
         self.is_active = False
         self.checkins = []
         self.halfway_sent = False
         self.final_hour_sent = False
+        self.hourly_sent = []
         self._save_state()
