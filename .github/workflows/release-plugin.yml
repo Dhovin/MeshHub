@@ -2,9 +2,14 @@ name: Build & Release openHop Plugin
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
+
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: "node24"
 
 jobs:
   build-and-release:
@@ -48,13 +53,34 @@ jobs:
           name: openhop-meshhub-bot-wheel
           path: dist/*.whl
 
-      - name: Create Release & Upload Asset
+      - name: Publish Rolling Latest Release (on push to main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "latest"
+          name: "MeshHub Bot for openHop (Latest Build)"
+          prerelease: false
+          make_latest: "true"
+          files: dist/*.whl
+          body: |
+            ### Automated Build: openhop.meshhub-bot
+            **SHA-256:** `${{ steps.checksum.outputs.sha256 }}`
+            
+            #### Easy Install on openHop Repeater:
+            ```bash
+            openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/latest/download/openhop_meshhub_bot-1.0.0-py3-none-any.whl
+            ```
+
+      - name: Publish Versioned Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.whl
           body: |
-            ### openHop Plugin Release: openhop.meshhub-bot
+            ### openHop Plugin Release: openhop.meshhub-bot (${{ github.ref_name }})
             **SHA-256:** `${{ steps.checksum.outputs.sha256 }}`
             
-            Install directly via openHop Repeater Plugin Manager or download the attached wheel.
+            #### Easy Install on openHop Repeater:
+            ```bash
+            openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/download/${{ github.ref_name }}/openhop_meshhub_bot-1.0.0-py3-none-any.whl
+            ```

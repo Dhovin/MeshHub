@@ -35,6 +35,20 @@ Designed to run supervised out-of-process under `openhop-plugin-manager`, MeshHu
 
 ---
 
+## Installation
+
+### One-Command Install on openHop Repeater
+```bash
+openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/latest/download/openhop_meshhub_bot-1.0.0-py3-none-any.whl
+```
+
+Or install directly from git:
+```bash
+openhop-plugin-manager install git+https://github.com/Dhovin/meshhub-bot-openhop.git
+```
+
+---
+
 ## Directory Structure
 
 ```
