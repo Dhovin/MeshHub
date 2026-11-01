@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "description": "Bot & automation suite for openHop: !help, NWS weather alerts, radio net controller, MeshWars, and keyword auto-responder.",
   "author": "MeshHub",
-  "homepage": "https://github.com/Dhovin/MeshCore-Bot",
+  "homepage": "https://github.com/Dhovin/meshhub-bot-openhop",
   "profile": "python-service-v1",
   "service": {
     "console_script": "openhop-meshhub-bot",

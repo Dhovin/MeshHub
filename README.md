@@ -38,7 +38,7 @@ Designed to run supervised out-of-process under `openhop-plugin-manager`, MeshHu
 ## Directory Structure
 
 ```
-MeshCore-Bot/
+meshhub-bot-openhop/
 ├── pyproject.toml              # PEP 621 packaging for openHop (python-service-v1)
 ├── setup.py                    # Wheel data_files packaging definition
 ├── catalogue_entry.json        # Catalogue metadata for openhop-plugin-catalogue
