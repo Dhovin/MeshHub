@@ -41,3 +41,8 @@ ENV/
 config/config.json.template
 config/net_state.json
 config/weather_subscriptions.json
+
+# Python distribution & build artifacts
+build/
+dist/
+*.egg-info/

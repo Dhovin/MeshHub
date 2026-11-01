@@ -30,7 +30,7 @@
           "maximum": 65535
         }
       },
-      "required": ["type", "address", "port", "baudrate", "host", "tcpPort"]
+      "required": ["host", "tcpPort"]
     },
     "core": {
       "type": "object",
@@ -61,6 +61,10 @@
           "minimum": -180.0,
           "maximum": 180.0
         },
+        "perUserRateLimitSeconds": {
+          "type": "number",
+          "minimum": 0.0
+        },
         "rateLimiting": {
           "type": "object",
           "properties": {
@@ -77,8 +81,7 @@
             }
           }
         }
-      },
-      "required": ["timeSyncInterval", "shutdownTimeoutMs"]
+      }
     },
     "modules": {
       "type": "object"

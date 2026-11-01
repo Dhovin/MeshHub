@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "id": "openhop.meshhub-bot",
+  "name": "MeshHub Bot",
+  "version": "1.0.0",
+  "description": "Bot & automation suite for openHop: !help, NWS weather alerts, radio net controller, MeshWars, and keyword auto-responder.",
+  "author": "MeshHub",
+  "homepage": "https://github.com/Dhovin/MeshCore-Bot",
+  "profile": "python-service-v1",
+  "service": {
+    "console_script": "openhop-meshhub-bot",
+    "package_root": "openhop_meshhub_bot",
+    "module": "openhop_meshhub_bot.main",
+    "callable": "main"
+  },
+  "ui": {
+    "title": "MeshHub Bot",
+    "entry": "ui/index.html"
+  }
+}
