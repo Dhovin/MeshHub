@@ -4,6 +4,8 @@ import json
 import logging
 import asyncio
 import signal
+import time
+from pathlib import Path
 
 try:
     from openhop_meshhub_bot.core.validator import validate as validate_schema
@@ -14,6 +16,7 @@ try:
     from openhop_meshhub_bot.core.module_manager import ModuleManager
     from openhop_meshhub_bot.core.command_dispatcher import CommandDispatcher
     from openhop_meshhub_bot.core.rate_limiter import PerUserRateLimiter
+    from openhop_meshhub_bot.web.runtime_writer import RuntimeWriter
 except ImportError:
     from core.validator import validate as validate_schema
     from core.event_bus import EventBus
@@ -23,6 +26,7 @@ except ImportError:
     from core.module_manager import ModuleManager
     from core.command_dispatcher import CommandDispatcher
     from core.rate_limiter import PerUserRateLimiter
+    from web.runtime_writer import RuntimeWriter
 
 logger = logging.getLogger("MeshHub")
 
@@ -286,12 +290,44 @@ class MeshHub:
         # 4.5. Start IPC / API Server
         await self.start_ipc_server()
 
+        # 4.6. Start openHop Dual Runtime Telemetry Publisher
+        try:
+            data_dir = Path(self.get_data_dir())
+            self.runtime_writer = RuntimeWriter(data_dir)
+            self.runtime_writer_task = asyncio.create_task(
+                self.runtime_writer.run(self, self.shutdown_event, interval=3.0)
+            )
+            logger.info(f"openHop RuntimeWriter started (publishing to {data_dir / 'runtime.json'})")
+        except Exception as e:
+            logger.error(f"Error starting RuntimeWriter: {e}")
+
         logger.info("MeshHub Bot started successfully and running modules.")
         
         # Wait until shutdown event is set (by signal handler or connect failure)
         await self.shutdown_event.wait()
         logger.info(f"shutdown_event.wait() completed! Event state: {self.shutdown_event.is_set()}")
         await self.shutdown()
+
+    def get_runtime_payload(self) -> dict:
+        """Returns real-time telemetry state for openHop's runtime.json / dashboard."""
+        help_msg = self.command_dispatcher.build_help_message()
+        active_modules = [
+            m for m, instance in getattr(self.module_manager, "modules", {}).items()
+            if getattr(self.module_manager, "is_enabled", lambda _: True)(m)
+        ]
+        state = self.state_cache.get_state() if hasattr(self, "state_cache") else {}
+        return {
+            "id": "openhop.meshhub-bot",
+            "connected": getattr(self.connection_manager, "isConnected", False),
+            "connection_type": getattr(self.connection_manager, "connectionType", "tcp"),
+            "device_info": getattr(self.connection_manager, "deviceInfo", {}) or {},
+            "active_modules": active_modules,
+            "help_message": help_msg,
+            "help_length": len(help_msg.encode("utf-8")),
+            "rate_limit_seconds": 30,
+            "state": state,
+            "timestamp": time.time(),
+        }
 
     async def shutdown(self):
         if self._shutting_down:

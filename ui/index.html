@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeshHub Bot - openHop Plugin</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="plugin-container">
+    <header class="header">
+      <div class="title-row">
+        <h1>MeshHub Bot</h1>
+        <span class="badge badge-success" id="conn-badge">Connecting...</span>
+        <span class="badge badge-info">LoRa Limit: 135 chars</span>
+      </div>
+      <p class="subtitle">MeshCore automation suite for openHop: !help, NWS weather alerts, radio nets, and autoresponder.</p>
+    </header>
+
+    <div class="grid">
+      <!-- Live Help Response Card -->
+      <div class="card col-12">
+        <div class="card-header">
+          <h3>Over-The-Air !help Message Preview</h3>
+          <span class="char-count" id="help-char-count">0 / 135 chars</span>
+        </div>
+        <div class="help-box" id="help-text">Loading active command summary...</div>
+        <small class="hint">Sent as a single frame over LoRa when a user sends <code>!help</code> in a channel or DM.</small>
+      </div>
+
+      <!-- Modules Status -->
+      <div class="card col-6">
+        <div class="card-header">
+          <h3>Active Modules</h3>
+        </div>
+        <ul class="module-list" id="module-list">
+          <li>Loading modules...</li>
+        </ul>
+      </div>
+
+      <!-- Device & Companion Info -->
+      <div class="card col-6">
+        <div class="card-header">
+          <h3>openHop Integration</h3>
+        </div>
+        <div class="info-table">
+          <div class="info-row">
+            <span class="label">Companion Frame Server:</span>
+            <span class="value" id="comp-server">127.0.0.1:5000 (TCP)</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Plugin ID:</span>
+            <span class="value">openhop.meshhub-bot</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Anti-Spam Cooldown:</span>
+            <span class="value">30s per user</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Radio Link Status:</span>
+            <span class="value" id="radio-status">Managed by openHop</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
