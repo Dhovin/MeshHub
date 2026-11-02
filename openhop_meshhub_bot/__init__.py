@@ -2,4 +2,4 @@
 MeshHub Bot: Community & Automation Suite for openHop Repeater
 """
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"

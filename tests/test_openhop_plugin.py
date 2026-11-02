@@ -120,6 +120,7 @@ class TestOpenHopPlugin(unittest.TestCase):
         self.assertEqual(service.get("module"), "openhop_meshhub_bot.main")
         self.assertEqual(service.get("callable"), "main")
         ui = manifest.get("ui", {})
+        self.assertEqual(ui.get("type"), "application")
         self.assertEqual(ui.get("entry"), "ui/index.html")
 
     def test_data_dir_isolation(self):
