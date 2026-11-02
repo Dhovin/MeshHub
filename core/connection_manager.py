@@ -1782,6 +1782,30 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Error pushing location telemetry mode to device: {e}", exc_info=True)
 
+        # Push default flood scope to the node if configured
+        default_scope = core_cfg.get("default_flood_scope")
+        if default_scope is not None and hasattr(self.mc, "commands") and hasattr(self.mc.commands, "set_default_flood_scope"):
+            logger.info(f"Setting default flood scope from config on startup: '{default_scope}'")
+            try:
+                if str(default_scope).strip() in ("", "0", "None", "none", "clear", "*"):
+                    res = await self.mc.commands.reset_default_flood_scope()
+                else:
+                    res = await self.mc.commands.set_default_flood_scope(str(default_scope).strip())
+                if getattr(res, "type", None) == EventType.ERROR:
+                    logger.warning(f"Failed to set default flood scope on node: {res}")
+                else:
+                    logger.info(f"Successfully configured default flood scope to '{default_scope}'.")
+            except Exception as e:
+                logger.error(f"Error configuring default flood scope on device: {e}", exc_info=True)
+        elif hasattr(self.mc, "commands") and hasattr(self.mc.commands, "get_default_flood_scope"):
+            try:
+                res = await self.mc.commands.get_default_flood_scope()
+                if getattr(res, "type", None) != EventType.ERROR and getattr(res, "payload", None):
+                    scope_info = res.payload
+                    logger.info(f"Current node default flood scope: {scope_info.get('scope_name') or '(none)'}")
+            except Exception as e:
+                logger.debug(f"Could not read node default flood scope: {e}")
+
         # Trigger telemetry sync immediately on boot
         await self.sync_telemetry()
 
@@ -1847,9 +1871,15 @@ class ConnectionManager:
             if channel_val is None:
                 channel_val = payload.get("chan_name") or payload.get("chan_nb") or 0
                 
-            # 1. Attempt to resolve sender name from channels log first using the raw text
+            # 1. Attempt to resolve sender name and route/scope metadata from channels log
             sender = payload.get("sender") or payload.get("from")
-            if (not sender or sender == "unknown") and hasattr(self, 'mc') and self.mc:
+            scoped = False
+            scope_code = None
+            return_scope_code = None
+            route_type_name = "FLOOD"
+            transport_code = None
+
+            if hasattr(self, 'mc') and self.mc:
                 logged = None
                 reader = getattr(self.mc, '_reader', None)
                 parser = getattr(reader, 'packet_parser', None) if reader else None
@@ -1861,16 +1891,32 @@ class ConnectionManager:
                             break
 
                 if logged:
-                    # Try transport_code matching
+                    rt = logged.get("route_type")
+                    rt_name = logged.get("route_typename", "")
                     transport_code = logged.get("transport_code")
-                    if transport_code:
-                        contact = self.mc.get_contact_by_key_prefix(transport_code)
-                        if contact:
-                            sender = contact.get("adv_name") or contact.get("name") or f"Unknown-{contact.get('public_key', '')[:6]}"
-                    
-                    # Fallback to Unknown-{transport_code[:6]} if transport_code is present but contact is unknown
-                    if (not sender or sender == "unknown") and transport_code:
-                        sender = f"Unknown-{transport_code[:6]}"
+
+                    # In MeshCore:
+                    # route_type 0 (TC_FLOOD / TRANSPORT_FLOOD): 4-byte transport_code = scope_code (2B) + return_scope (2B).
+                    # This is REGION SCOPED. It is NOT a contact key prefix!
+                    if rt == 0 or rt_name == "TC_FLOOD":
+                        scoped = True
+                        route_type_name = "TRANSPORT_FLOOD"
+                        if transport_code:
+                            scope_code = transport_code[:4]
+                            if len(transport_code) >= 8:
+                                return_scope_code = transport_code[4:8]
+                    else:
+                        if transport_code:
+                            route_type_name = "TRANSPORT_DIRECT"
+                            contact = self.mc.get_contact_by_key_prefix(transport_code)
+                            if contact:
+                                sender = contact.get("adv_name") or contact.get("name") or f"Unknown-{contact.get('public_key', '')[:6]}"
+                            if (not sender or sender == "unknown"):
+                                sender = f"Unknown-{transport_code[:6]}"
+                        elif rt == 2 or rt_name == "DIRECT":
+                            route_type_name = "DIRECT"
+                        else:
+                            route_type_name = "FLOOD"
 
             # 2. Only if packet/log resolution failed, try to guess the sender from a text prefix (e.g. "Name: message")
             if not sender or sender == "unknown":
@@ -1919,7 +1965,12 @@ class ConnectionManager:
                 "path": payload.get("path"),
                 "path_len": path_len,
                 "path_hash_mode": payload.get("path_hash_mode"),
-                "hops": 0 if path_len == 255 else (path_len if path_len is not None else None)
+                "hops": 0 if path_len == 255 else (path_len if path_len is not None else None),
+                "scoped": scoped,
+                "route_type": route_type_name,
+                "scope_code": scope_code,
+                "return_scope_code": return_scope_code,
+                "transport_code": transport_code
             }
             self.bot.event_bus.publish("message", msg)
         except Exception as e:

@@ -1375,6 +1375,17 @@ class Mqtt:
         if route == "D" and decoded and 'path' in decoded:
             packet_data["path"] = ",".join(decoded['path'])
 
+        if decoded:
+            packet_data["scoped"] = decoded.get("scoped", False)
+            if decoded.get("scoped"):
+                packet_data["scope_code"] = decoded.get("scope_code")
+                if decoded.get("scope"):
+                    packet_data["scope"] = decoded.get("scope")
+                if decoded.get("transport_codes"):
+                    packet_data["transport_codes"] = decoded.get("transport_codes")
+            elif decoded.get("transport_codes"):
+                packet_data["transport_codes"] = decoded.get("transport_codes")
+
         # Attach decoded application payload if enabled
         if self.decode_payloads and self.channel_key_store is not None and decoded:
             try:
@@ -1403,7 +1414,29 @@ class Mqtt:
             route_type = RouteType(header & 0x03)
             has_transport = route_type in [RouteType.TRANSPORT_FLOOD, RouteType.TRANSPORT_DIRECT]
             
-            offset = 5 if has_transport else 1
+            transport_codes = None
+            scope_code = None
+            return_scope_code = None
+            next_hop = None
+            last_hop = None
+            scoped = False
+
+            if has_transport:
+                if len(byte_data) < 5:
+                    return None
+                transport_bytes = byte_data[1:5]
+                transport_codes = transport_bytes.hex().upper()
+                if route_type == RouteType.TRANSPORT_FLOOD:
+                    scoped = True
+                    scope_code = transport_bytes[:2].hex().upper()
+                    return_scope_code = transport_bytes[2:4].hex().upper()
+                else:
+                    next_hop = transport_bytes[:2].hex().upper()
+                    last_hop = transport_bytes[2:4].hex().upper()
+                offset = 5
+            else:
+                offset = 1
+
             if len(byte_data) <= offset:
                 return None
                 
@@ -1424,12 +1457,23 @@ class Mqtt:
                 
             payload_type = PayloadType((header >> 2) & 0x0F)
             path_values = self._split_path_hops(path_bytes, path_hash_bytes)
+
+            matched_scope = None
+            if scoped and scope_code:
+                matched_scope = self._resolve_scope_name(scope_code, payload_type.value, payload)
             
             message = {
                 "payload_type": payload_type.name,
                 "payload_type_value": payload_type.value,
                 "payload_version": payload_version.name,
                 "route_type": route_type.name,
+                "scoped": scoped,
+                "scope_code": scope_code,
+                "return_scope_code": return_scope_code,
+                "transport_codes": transport_codes,
+                "scope": matched_scope,
+                "next_hop": next_hop,
+                "last_hop": last_hop,
                 "path": path_values,
                 "path_len_byte": path_len_byte,
                 "path_byte_len": path_byte_len,
@@ -1446,6 +1490,48 @@ class Mqtt:
             return message
         except Exception:
             return None
+
+    def _compute_scope_code(self, scope_name: str, payload_type_val: int, payload_bytes: bytes) -> str:
+        """Compute the 16-bit transport code hex (little-endian byte order) for a given scope name."""
+        clean_scope = scope_name.strip()
+        if clean_scope and not clean_scope.startswith("#"):
+            clean_scope = "#" + clean_scope
+        scope_key = hashlib.sha256(clean_scope.encode("utf-8")).digest()[:16]
+        h = hmac.new(scope_key, bytes([payload_type_val]) + payload_bytes, hashlib.sha256).digest()
+        code = int.from_bytes(h[:2], byteorder="little")
+        if code == 0:
+            code = 1
+        elif code == 0xFFFF:
+            code = 0xFFFE
+        return code.to_bytes(2, "little").hex().upper()
+
+    def _resolve_scope_name(self, scope_code: str, payload_type_val: int, payload_bytes: bytes) -> Optional[str]:
+        """Attempt to match a 2-byte scope code against known scopes."""
+        known_scopes = []
+        core_cfg = getattr(self.api.bot, "config", {}).get("core", {}) if hasattr(self, "api") and getattr(self.api, "bot", None) else {}
+        def_scope = core_cfg.get("default_flood_scope")
+        if def_scope and def_scope not in known_scopes:
+            known_scopes.append(def_scope)
+        for sc in core_cfg.get("known_scopes", []):
+            if sc and sc not in known_scopes:
+                known_scopes.append(sc)
+        for sc in self.config.get("known_scopes", []):
+            if sc and sc not in known_scopes:
+                known_scopes.append(sc)
+        if hasattr(self, "neighbors_config") and self.neighbors_config and self.neighbors_config.self_scopes:
+            for sc in self.neighbors_config.self_scopes.split(","):
+                sc = sc.strip()
+                if sc and sc not in known_scopes:
+                    known_scopes.append(sc)
+
+        for sc in known_scopes:
+            try:
+                exp = self._compute_scope_code(sc, payload_type_val, payload_bytes)
+                if exp == scope_code:
+                    return sc
+            except Exception:
+                pass
+        return None
 
     def _decode_packed_path_length(self, path_len_byte: int) -> tuple:
         path_byte_len = path_len_byte & 0x3F
