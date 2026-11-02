@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openhop-meshhub-bot"
-version = "1.0.2"
+version = "1.0.3"
 description = "Bot & Community Automation Suite for openHop Repeater (Weather, Nets, MeshWars, Autoresponder)"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -244,6 +244,16 @@ class MeshHub:
 
     async def main(self):
         logger.info("Starting MeshHub Central Hub...")
+        if not self.config:
+            self.load_and_validate_config()
+        if self.shutdown_event is None:
+            self.shutdown_event = asyncio.Event()
+        if self.loop is None:
+            try:
+                self.loop = asyncio.get_running_loop()
+                self._setup_signals()
+            except RuntimeError:
+                pass
         
         # Resolve timezone
         await self.resolve_timezone()
