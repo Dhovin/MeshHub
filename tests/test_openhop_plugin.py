@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import unittest
 import asyncio
@@ -141,6 +142,32 @@ class TestOpenHopPlugin(unittest.TestCase):
                 os.environ["OPENHOP_PLUGIN_DATA"] = old_val
             else:
                 os.environ.pop("OPENHOP_PLUGIN_DATA", None)
+
+    def test_packaged_imports_without_root_core(self):
+        """Verify that openhop_meshhub_bot can import without relying on root core package."""
+        import subprocess
+        repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).replace("\\", "/")
+        script = (
+            f"import sys, os, tempfile, shutil; "
+            f"repo_dir = '{repo_dir}'; "
+            f"pkg_dir = os.path.join(repo_dir, 'openhop_meshhub_bot'); "
+            f"tmp = tempfile.mkdtemp(); "
+            f"shutil.copytree(pkg_dir, os.path.join(tmp, 'openhop_meshhub_bot')); "
+            f"sys.path = [tmp] + [p for p in sys.path if 'meshhub' not in p.lower()]; "
+            f"from openhop_meshhub_bot.core.module_manager import ModuleManager; "
+            f"from openhop_meshhub_bot.core.connection_manager import ConnectionManager; "
+            f"from openhop_meshhub_bot.core.bot import MeshHub; "
+            f"from openhop_meshhub_bot.main import main; "
+            f"shutil.rmtree(tmp, ignore_errors=True); "
+            f"print('IMPORTS_OK')"
+        )
+        res = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True
+        )
+        self.assertEqual(res.returncode, 0, f"Import failed: {res.stderr}")
+        self.assertIn("IMPORTS_OK", res.stdout)
 
 if __name__ == "__main__":
     unittest.main()

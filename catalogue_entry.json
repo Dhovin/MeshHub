@@ -3,5 +3,5 @@
   "name": "MeshHub Bot",
   "description": "Multi-function bot automation suite for openHop repeaters: !help, NWS weather alerts, radio net controller, MeshWars, and keyword auto-responder.",
   "repository": "Dhovin/meshhub-bot-openhop",
-  "version": "1.0.4"
+  "version": "1.0.5"
 }

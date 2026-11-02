@@ -7,26 +7,15 @@ import signal
 import time
 from pathlib import Path
 
-try:
-    from openhop_meshhub_bot.core.validator import validate as validate_schema
-    from openhop_meshhub_bot.core.event_bus import EventBus
-    from openhop_meshhub_bot.core.state_cache import StateCache
-    from openhop_meshhub_bot.core.scheduler import Scheduler
-    from openhop_meshhub_bot.core.connection_manager import ConnectionManager, clamp_lora_message
-    from openhop_meshhub_bot.core.module_manager import ModuleManager
-    from openhop_meshhub_bot.core.command_dispatcher import CommandDispatcher
-    from openhop_meshhub_bot.core.rate_limiter import PerUserRateLimiter
-    from openhop_meshhub_bot.web.runtime_writer import RuntimeWriter
-except ImportError:
-    from core.validator import validate as validate_schema
-    from core.event_bus import EventBus
-    from core.state_cache import StateCache
-    from core.scheduler import Scheduler
-    from core.connection_manager import ConnectionManager, clamp_lora_message
-    from core.module_manager import ModuleManager
-    from core.command_dispatcher import CommandDispatcher
-    from core.rate_limiter import PerUserRateLimiter
-    from web.runtime_writer import RuntimeWriter
+from .validator import validate as validate_schema
+from .event_bus import EventBus
+from .state_cache import StateCache
+from .scheduler import Scheduler
+from .connection_manager import ConnectionManager, clamp_lora_message
+from .module_manager import ModuleManager
+from .command_dispatcher import CommandDispatcher
+from .rate_limiter import PerUserRateLimiter
+from ..web.runtime_writer import RuntimeWriter
 
 logger = logging.getLogger("MeshHub")
 

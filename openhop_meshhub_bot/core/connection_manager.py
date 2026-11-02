@@ -7,10 +7,7 @@ import hashlib
 from meshcore.meshcore import MeshCore
 from meshcore.events import EventType
 
-try:
-    from openhop_meshhub_bot.core.rate_limiter import BotTxRateLimiter
-except ImportError:
-    from core.rate_limiter import BotTxRateLimiter
+from .rate_limiter import BotTxRateLimiter
 
 logger = logging.getLogger("ConnectionManager")
 
@@ -174,7 +171,7 @@ class ConnectionManager:
         cmd = cmd.lower()
 
         # Enforce module channel access restrictions if running in a module context
-        from core.module_manager import active_module_var
+        from .module_manager import active_module_var
         active_module = active_module_var.get(None)
         if active_module:
             is_allowed = True

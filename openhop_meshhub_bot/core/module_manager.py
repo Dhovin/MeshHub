@@ -4,9 +4,9 @@ import logging
 import asyncio
 import importlib.util
 import contextvars
-from core.validator import validate as validate_schema
-from core.template_engine import extract_template_fields, format_template
-from core.rate_limiter import PerUserRateLimiter, ChannelRateLimiter
+from .validator import validate as validate_schema
+from .template_engine import extract_template_fields, format_template
+from .rate_limiter import PerUserRateLimiter, ChannelRateLimiter
 
 logger = logging.getLogger("ModuleManager")
 
