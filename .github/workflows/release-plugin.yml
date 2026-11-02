@@ -41,8 +41,10 @@ jobs:
         id: checksum
         run: |
           WHL_FILE=$(ls dist/*.whl | head -n 1)
+          WHL_BASENAME=$(basename "$WHL_FILE")
           SHA256=$(sha256sum "$WHL_FILE" | awk '{print $1}')
           echo "wheel_file=$WHL_FILE" >> $GITHUB_OUTPUT
+          echo "wheel_name=$WHL_BASENAME" >> $GITHUB_OUTPUT
           echo "sha256=$SHA256" >> $GITHUB_OUTPUT
           echo "Built wheel: $WHL_FILE"
           echo "SHA-256 Digest: $SHA256"
@@ -68,7 +70,7 @@ jobs:
             
             #### Easy Install on openHop Repeater:
             ```bash
-            openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/latest/download/openhop_meshhub_bot-1.0.0-py3-none-any.whl
+            openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/latest/download/${{ steps.checksum.outputs.wheel_name }}
             ```
 
       - name: Publish Versioned Release (on tag)
@@ -82,5 +84,5 @@ jobs:
             
             #### Easy Install on openHop Repeater:
             ```bash
-            openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/download/${{ github.ref_name }}/openhop_meshhub_bot-1.0.0-py3-none-any.whl
+            openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/download/${{ github.ref_name }}/${{ steps.checksum.outputs.wheel_name }}
             ```

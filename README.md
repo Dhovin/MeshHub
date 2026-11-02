@@ -39,7 +39,7 @@ Designed to run supervised out-of-process under `openhop-plugin-manager`, MeshHu
 
 ### One-Command Install on openHop Repeater
 ```bash
-openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/latest/download/openhop_meshhub_bot-1.0.0-py3-none-any.whl
+openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/latest/download/openhop_meshhub_bot-1.0.1-py3-none-any.whl
 ```
 
 Or install directly from git:
@@ -120,7 +120,7 @@ pip install build
 python -m build --wheel
 ```
 
-The compiled wheel is created in `dist/openhop_meshhub_bot-1.0.0-py3-none-any.whl`.
+The compiled wheel is created in `dist/openhop_meshhub_bot-1.0.1-py3-none-any.whl`.
 
 ### 3. Running Development Unit Tests
 ```bash

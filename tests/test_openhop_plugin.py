@@ -101,7 +101,7 @@ class TestOpenHopPlugin(unittest.TestCase):
         asyncio.run(run_test())
 
     def test_openhop_plugin_manifest_schema(self):
-        """Verify openhop-plugin.json manifest complies with OpenHop Schema 2."""
+        """Verify openhop-plugin.json manifest complies with OpenHop Schema 1."""
         manifest_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "openhop_meshhub_bot", "share", "openhop", "plugins", "openhop.meshhub-bot", "openhop-plugin.json"
@@ -111,7 +111,7 @@ class TestOpenHopPlugin(unittest.TestCase):
         with open(manifest_path, "r", encoding="utf-8") as f:
             manifest = json.load(f)
 
-        self.assertEqual(manifest.get("schema"), 2)
+        self.assertEqual(manifest.get("schema"), 1)
         self.assertEqual(manifest.get("id"), "openhop.meshhub-bot")
         self.assertEqual(manifest.get("profile"), "python-service-v1")
         service = manifest.get("service", {})
