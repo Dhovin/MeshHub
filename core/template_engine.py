@@ -154,7 +154,11 @@ def extract_template_fields(message_data: dict, timezone_str: str = "UTC", state
         "connection_info": conn_info,
         "timestamp": timestamp_str,
         "elapsed": elapsed_str,
-        "battery": battery_str
+        "battery": battery_str,
+        "scoped": "Yes" if data.get("scoped") else "No",
+        "scope": str(data.get("scope") or data.get("scope_code") or "unscoped"),
+        "scope_code": str(data.get("scope_code") or ""),
+        "route_type": str(data.get("route_type") or ("TRANSPORT_FLOOD" if data.get("scoped") else "FLOOD"))
     }
 
 

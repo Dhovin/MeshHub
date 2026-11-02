@@ -8,7 +8,12 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["auto", "ble", "serial", "tcp"]
+          "enum": [
+            "auto",
+            "ble",
+            "serial",
+            "tcp"
+          ]
         },
         "address": {
           "type": "string"
@@ -30,7 +35,10 @@
           "maximum": 65535
         }
       },
-      "required": ["host", "tcpPort"]
+      "required": [
+        "host",
+        "tcpPort"
+      ]
     },
     "core": {
       "type": "object",
@@ -80,6 +88,15 @@
               "type": "object"
             }
           }
+        },
+        "default_flood_scope": {
+          "type": "string"
+        },
+        "known_scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -87,5 +104,9 @@
       "type": "object"
     }
   },
-  "required": ["connection", "core", "modules"]
+  "required": [
+    "connection",
+    "core",
+    "modules"
+  ]
 }
