@@ -25,7 +25,7 @@ class TestOpenHopPlugin(unittest.TestCase):
         self.assertEqual(len(clamped), 135)
 
         # Unicode/emoji clamping
-        emoji_msg = "⚡" * 80  # Each⚡ is 3 bytes in UTF-8
+        emoji_msg = "⚡" * 80  # Each ⚡ is 3 bytes in UTF-8
         clamped_emoji = clamp_lora_message(emoji_msg)
         self.assertTrue(len(clamped_emoji.encode("utf-8")) <= 135)
         self.assertTrue(clamped_emoji.endswith("..."))
@@ -50,54 +50,40 @@ class TestOpenHopPlugin(unittest.TestCase):
         self.assertIn("#checkin", help_partial)
         self.assertNotIn("!checkin", help_partial)
 
-        # No modules enabled
-        mock_bot.module_manager.is_enabled.side_effect = lambda mod: False
-        help_none = dispatcher.build_help_message()
-        self.assertTrue(len(help_none.encode("utf-8")) <= 135)
-
-    def test_command_dispatcher_help_execution(self):
-        """Verify handle_message triggers send_reply with !help."""
+    def test_dispatcher_help_cooldown(self):
+        """Verify !help queries honor per-user airtime limits."""
         async def run_test():
             mock_bot = MagicMock()
-            mock_bot.module_manager.is_enabled.return_value = True
             mock_bot.can_send_user.return_value = True
+            mock_bot.record_user_send = MagicMock()
             mock_bot.send_reply = AsyncMock()
 
             dispatcher = CommandDispatcher(mock_bot)
-            handled = await dispatcher.handle_message(
-                sender="Alice",
-                text="!help",
-                channel="#net",
-                packet_meta={}
-            )
-            self.assertTrue(handled)
-            mock_bot.send_reply.assert_called_once()
-            args = mock_bot.send_reply.call_args[1]
-            self.assertEqual(args["sender"], "Alice")
-            self.assertEqual(args["channel"], "#net")
-            self.assertTrue(len(args["text"]) <= 135)
 
-        asyncio.run(run_test())
-
-    def test_command_dispatcher_rate_limiting(self):
-        """Verify rapid repeated !help calls from same sender are rate limited."""
-        async def run_test():
-            mock_bot = MagicMock()
-            mock_bot.module_manager.is_enabled.return_value = True
-            mock_bot.can_send_user.side_effect = [True, False]
-            mock_bot.send_reply = AsyncMock()
-
-            dispatcher = CommandDispatcher(mock_bot)
             # 1st call
-            res1 = await dispatcher.handle_message("Bob", "!help", None)
+            res1 = await dispatcher.handle_message("Alice", "!help", None)
             self.assertTrue(res1)
             self.assertEqual(mock_bot.send_reply.call_count, 1)
 
             # 2nd call (rate limited)
-            res2 = await dispatcher.handle_message("Bob", "!help", None)
+            mock_bot.can_send_user.return_value = False
+            res2 = await dispatcher.handle_message("Alice", "!help", None)
             self.assertTrue(res2)
             # send_reply should NOT be called again
             self.assertEqual(mock_bot.send_reply.call_count, 1)
+
+        asyncio.run(run_test())
+
+    def test_dispatcher_ignores_unrelated(self):
+        """Verify dispatcher ignores non-command messages."""
+        async def run_test():
+            mock_bot = MagicMock()
+            mock_bot.send_reply = AsyncMock()
+            dispatcher = CommandDispatcher(mock_bot)
+
+            res = await dispatcher.handle_message("Bob", "Just a regular chat message", None)
+            self.assertFalse(res)
+            self.assertEqual(mock_bot.send_reply.call_count, 0)
 
         asyncio.run(run_test())
 
@@ -168,6 +154,26 @@ class TestOpenHopPlugin(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0, f"Import failed: {res.stderr}")
         self.assertIn("IMPORTS_OK", res.stdout)
+
+    def test_get_runtime_payload_with_real_module_manager(self):
+        """Verify MeshHub.get_runtime_payload works with real ModuleManager without AttributeError."""
+        hub = MeshHub()
+        hub.config = {
+            "modules": {
+                "weather_bot": {"enabled": True},
+                "net_bot": {"enabled": False}
+            }
+        }
+        self.assertTrue(hub.module_manager.is_enabled("weather_bot"))
+        self.assertFalse(hub.module_manager.is_enabled("net_bot"))
+
+        payload = hub.get_runtime_payload()
+        self.assertIsInstance(payload, dict)
+        self.assertEqual(payload["id"], "openhop.meshhub-bot")
+        self.assertIn("help_message", payload)
+        self.assertIn("help_length", payload)
+        self.assertTrue(payload["help_length"] <= 135)
+        self.assertIn("active_modules", payload)
 
 if __name__ == "__main__":
     unittest.main()

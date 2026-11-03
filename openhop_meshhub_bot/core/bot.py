@@ -300,10 +300,7 @@ class MeshHub:
     def get_runtime_payload(self) -> dict:
         """Returns real-time telemetry state for openHop's runtime.json / dashboard."""
         help_msg = self.command_dispatcher.build_help_message()
-        active_modules = [
-            m for m, instance in getattr(self.module_manager, "modules", {}).items()
-            if getattr(self.module_manager, "is_enabled", lambda _: True)(m)
-        ]
+        active_modules = list(getattr(self.module_manager, "modules", {}).keys())
         state = self.state_cache.get_state() if hasattr(self, "state_cache") else {}
         return {
             "id": "openhop.meshhub-bot",

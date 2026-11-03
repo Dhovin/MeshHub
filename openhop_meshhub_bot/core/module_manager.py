@@ -268,6 +268,15 @@ class ModuleManager:
         self.user_limiter = PerUserRateLimiter(user_sec)
         self.channel_limiter = ChannelRateLimiter(chan_limits)
 
+    def is_enabled(self, module_name: str) -> bool:
+        """Returns True if the module is loaded and enabled."""
+        if hasattr(self, "modules") and module_name in self.modules:
+            return True
+        if hasattr(self, "bot") and hasattr(self.bot, "config"):
+            modules_cfg = (self.bot.config or {}).get("modules", {})
+            return bool(modules_cfg.get(module_name, {}).get("enabled", False))
+        return False
+
     async def load_modules(self, modules_dir):
         """
         Scans modules_dir, imports modules dynamically, and runs schema validation.

@@ -21,13 +21,15 @@ class CommandDispatcher:
         """Constructs a single concise help message strictly <= 135 characters."""
         features = []
         if hasattr(self.bot, "module_manager") and self.bot.module_manager:
-            if self.bot.module_manager.is_enabled("net_bot"):
+            mm = self.bot.module_manager
+            is_mod_enabled = getattr(mm, "is_enabled", lambda m: m in getattr(mm, "modules", {}))
+            if is_mod_enabled("net_bot"):
                 features.append("#checkin (Net)")
-            if self.bot.module_manager.is_enabled("meshwars_bot"):
+            if is_mod_enabled("meshwars_bot"):
                 features.append("!checkin (MeshWars)")
-            if self.bot.module_manager.is_enabled("autoresponce"):
+            if is_mod_enabled("autoresponce"):
                 features.append("Auto-reply active")
-            if self.bot.module_manager.is_enabled("weather_bot"):
+            if is_mod_enabled("weather_bot"):
                 features.append("NWS alerts active")
 
         if not features:

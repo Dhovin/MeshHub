@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "openhop.meshhub-bot",
   "name": "MeshHub Bot",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Bot & Community Automation Suite for openHop Repeater: !help, NWS weather alerts, radio net controller, MeshWars, and keyword auto-responder.",
   "profile": "python-service-v1",
   "runtime": {
