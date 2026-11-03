@@ -306,6 +306,8 @@ class MeshHub:
             "id": "openhop.meshhub-bot",
             "connected": getattr(self.connection_manager, "isConnected", False),
             "connection_type": getattr(self.connection_manager, "connectionType", "tcp"),
+            "host": (self.config or {}).get("connection", {}).get("host", "127.0.0.1"),
+            "port": (self.config or {}).get("connection", {}).get("tcpPort", 5000),
             "device_info": getattr(self.connection_manager, "deviceInfo", {}) or {},
             "active_modules": active_modules,
             "help_message": help_msg,
