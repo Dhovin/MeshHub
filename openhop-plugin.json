@@ -2,18 +2,11 @@
   "schema": 1,
   "id": "openhop.meshhub-bot",
   "name": "MeshHub Bot",
-  "version": "1.0.8",
-  "description": "Bot & Community Automation Suite for openHop Repeater: !help, NWS weather alerts, radio net controller, MeshWars, and keyword auto-responder.",
-  "profile": "python-service-v1",
+  "version": "2.0.0",
+  "description": "MeshCore companion bot for openHop Repeater with Autoresponder, US NWS Weather & Alerts, Radio Nets, and MeshWars.",
   "runtime": {
     "type": "python",
-    "entrypoint": "openhop-meshhub-bot"
-  },
-  "service": {
-    "console_script": "openhop-meshhub-bot",
-    "package_root": "openhop_meshhub_bot",
-    "module": "openhop_meshhub_bot.main",
-    "callable": "main"
+    "entrypoint": "meshhub-bot"
   },
   "ui": {
     "type": "application",
@@ -21,13 +14,16 @@
   },
   "config": {
     "defaults": {
+      "schema_version": 2,
       "connection": {
         "host": "127.0.0.1",
-        "tcpPort": 5000
+        "tcpPort": 5051
       },
       "core": {
-        "ipcPort": 5002,
-        "perUserRateLimitSeconds": 30.0
+        "timezone": "America/Chicago",
+        "perUserRateLimitSeconds": 30,
+        "txRateLimitSeconds": 1.5,
+        "activityLog": true
       },
       "modules": {
         "autoresponce": {
@@ -35,33 +31,69 @@
           "channels": [
             "#test"
           ],
-          "responseTemplate": "@[{sender}] ACK | Path: {hops_label}",
-          "maxHops": 15
+          "keywords": [
+            "test",
+            "ping",
+            "ack"
+          ],
+          "maxHops": 12,
+          "responseTemplate": "@[{sender}] ACK | Path: {hops_label}"
         },
         "weather_bot": {
           "enabled": true,
-          "channel": "#weather",
-          "cron": "0 7 * * *",
-          "latitude": 30.2672,
-          "longitude": -97.7431,
-          "nws_alerts": true
+          "zipCode": "20001",
+          "latitude": 38.9072,
+          "longitude": -77.0369,
+          "weatherChannel": "#weather",
+          "alertsChannel": "#weather",
+          "weatherAlarm": "0 7 * * *",
+          "nws_alerts": true,
+          "alertPollSeconds": 300,
+          "userAgent": "openHopMeshHubBot/2.0.0 (https://github.com/Dhovin/meshhub-bot-openhop)",
+          "ignore_severities": [
+            "Minor",
+            "Unknown"
+          ],
+          "ignore_events": [],
+          "alertTemplate": "⚠️ {event} ({severity}) for {region} until {end}: {headline}",
+          "clearTemplate": "🟢 CLEAR: {event} has ended for {region}.",
+          "forecastTemplate": ""
         },
         "net_bot": {
-          "enabled": true,
+          "enabled": false,
           "channel": "#net",
           "day_of_week": "Tuesday",
           "time": "19:00",
-          "duration": 2,
+          "duration": 2.0,
           "keyword": "#checkin",
+          "enable_reminders": true,
+          "enable_hourly_message": false,
+          "enable_mid_net_updates": false,
+          "opening_message": "Weekly Net is now OPEN! Send {keyword} to check in.",
+          "closing_message": "Weekly Net is now CLOSED. Total check-ins: {count}. Thank you for participating!",
+          "checkin_ack_template": "Welcome {sender}, {count} {user_str} {have_str} checked in.",
+          "reminder_1pm_message": "Reminder: Weekly Net tonight at {time} on {channel}! Send {keyword} to check in.",
+          "reminder_30m_message": "Weekly Net starts in 30 minutes on {channel}! Send {keyword} when the net opens.",
           "state_file": "net_state.json"
         },
         "meshwars_bot": {
-          "enabled": false,
+          "enabled": true,
           "channel": "#meshwars",
           "day_of_week": "Saturday",
           "time": "18:00",
-          "duration": 6,
+          "duration": 6.0,
           "checkin_keyword": "!checkin",
+          "enable_reminders": true,
+          "enable_hourly_message": true,
+          "enable_mid_net_updates": true,
+          "opening_message": "Welcome to the MeshWars net! Send !checkin or any chat message to participate.",
+          "hourly_message": "Register on https://meshwars.com and any message sent in this chat counts toward your bonus points.",
+          "halfway_message": "MeshWars Net Update: Halfway through tonight's net! {count} {user_str} checked in so far.",
+          "final_hour_message": "MeshWars Net Update: 1 hour remaining in tonight's net! {count} {user_str} checked in so far.",
+          "closing_message": "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today.",
+          "checkin_ack_template": "Welcome {sender}, {count} {user_str} {have_str} checked in.",
+          "reminder_1pm_message": "Reminder: MeshWars Net starts today at {time} on {channel}!",
+          "reminder_30m_message": "MeshWars Net starts in 30 minutes on {channel}! Get your nodes ready.",
           "state_file": "meshwars_state.json"
         }
       }

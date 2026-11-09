@@ -1,303 +1,1209 @@
+"use strict";
+
 const PLUGIN_ID = "openhop.meshhub-bot";
-let cachedConfig = {};
+const MAX_LORA_BYTES = 135;
 
-function getJwtToken() {
-  try {
-    const urlParams = new URLSearchParams(window.location.search);
-    const queryToken = urlParams.get("token");
-    if (queryToken) {
-      window.localStorage.setItem("pymc_jwt_token", queryToken);
-      return queryToken;
-    }
-    return window.localStorage.getItem("pymc_jwt_token") || 
-           window.sessionStorage.getItem("pymc_jwt_token") || 
-           (window.parent?.localStorage?.getItem("pymc_jwt_token")) || "";
-  } catch (_) {}
-  return "";
-}
+let currentConfig = null;
+let currentRuntime = null;
+let companionList = [];
+let selectedCompanionName = "";
+let nativeSelfInfo = null;
+let nativeChannels = [];
+let nativeContacts = [];
+let formsPopulated = false;
 
-async function apiFetch(url, options = {}) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Accept", "application/json");
-  const token = getJwtToken();
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  return fetch(url, { ...options, headers, cache: "no-store" });
-}
+// ------------------------------------------------------------------
+// Auth & HTTP Helpers
+// ------------------------------------------------------------------
 
-function showBanner(message, type = "success", durationMs = 5000) {
-  const banner = document.getElementById("alert-banner");
-  if (!banner) return;
-  banner.textContent = message;
-  banner.className = `alert-banner show alert-${type}`;
-  if (durationMs > 0) {
-    setTimeout(() => {
-      banner.className = "alert-banner";
-    }, durationMs);
-  }
-}
-
-function switchTab(tabName) {
-  const dashboardTab = document.getElementById("tab-dashboard");
-  const settingsTab = document.getElementById("tab-settings");
-  const btnDashboard = document.getElementById("tab-btn-dashboard");
-  const btnSettings = document.getElementById("tab-btn-settings");
-
-  if (tabName === "settings") {
-    dashboardTab.classList.remove("active");
-    settingsTab.classList.add("active");
-    btnDashboard.classList.remove("active");
-    btnSettings.classList.add("active");
-    loadSettings();
-  } else {
-    settingsTab.classList.remove("active");
-    dashboardTab.classList.add("active");
-    btnSettings.classList.remove("active");
-    btnDashboard.classList.add("active");
-    updateDashboard();
-  }
-}
-
-async function updateDashboard() {
-  const connBadge = document.getElementById("conn-badge");
-  const helpText = document.getElementById("help-text");
-  const helpCount = document.getElementById("help-char-count");
-  const moduleList = document.getElementById("module-list");
-  const compServer = document.getElementById("comp-server");
-  const deviceModel = document.getElementById("device-model");
-  const radioStatus = document.getElementById("radio-status");
-  const rateLimitVal = document.getElementById("rate-limit-val");
-
-  let payload = null;
-
-  // 1. Try reading real-time telemetry from openHop runtime API
-  try {
-    const res = await apiFetch(`/api/plugins/runtime?id=${PLUGIN_ID}`);
-    if (res.ok) {
-      payload = await res.json();
-    }
-  } catch (e) {
-    console.debug("Failed reading runtime endpoint:", e);
-  }
-
-  // 2. Fallback to settings _runtime state if runtime API returned empty or 404
-  if (!payload || Object.keys(payload).length === 0) {
+function getAuthHeaders() {
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  const keys = ["token", "auth_token", "openhop_token", "jwt", "access_token"];
+  for (const k of keys) {
     try {
-      const settingsRes = await apiFetch(`/api/plugins/settings?id=${PLUGIN_ID}`);
-      if (settingsRes.ok) {
-        const settingsData = await settingsRes.json();
-        payload = settingsData.saved?._runtime || settingsData.config?._runtime;
-        if (!cachedConfig || Object.keys(cachedConfig).length === 0) {
-          cachedConfig = settingsData.saved || settingsData.config || {};
-        }
+      const val = window.localStorage.getItem(k);
+      if (val && typeof val === "string" && val.trim()) {
+        headers.Authorization = `Bearer ${val.trim().replace(/^["']|["']$/g, "")}`;
+        break;
       }
-    } catch (e) {
-      console.debug("Failed reading settings fallback:", e);
+    } catch (_) {
+      // Ignore storage access errors
     }
   }
+  return headers;
+}
 
-  // Render Dashboard
-  if (payload && (payload.connected !== undefined || payload.active_modules)) {
-    connBadge.textContent = payload.connected ? "Connected to Companion" : "Connecting to openHop...";
-    connBadge.className = payload.connected ? "badge badge-success" : "badge badge-warning";
+async function apiGet(url) {
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} on ${url}`);
+  }
+  return await res.json();
+}
 
-    // Active modules list
-    if (payload.active_modules && payload.active_modules.length > 0) {
-      moduleList.innerHTML = payload.active_modules.map(m => {
-        return `<li><span><strong>${m}</strong></span><span class="badge badge-success">Active</span></li>`;
-      }).join("");
+async function apiPost(url, bodyObj) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    credentials: "same-origin",
+    body: JSON.stringify(bodyObj),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || data.message || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+function utf8ByteLength(str) {
+  return new TextEncoder().encode(String(str || "")).length;
+}
+
+function clampLoraUtf8(str, maxBytes = MAX_LORA_BYTES) {
+  const s = String(str || "");
+  if (utf8ByteLength(s) <= maxBytes) {
+    return s;
+  }
+  let out = s.slice(0, maxBytes - 3) + "...";
+  while (utf8ByteLength(out) > maxBytes && out.length > 3) {
+    out = out.slice(0, -4) + "...";
+  }
+  return out;
+}
+
+function deepMerge(target, source) {
+  const out = Object.assign({}, target || {});
+  if (!source || typeof source !== "object") {
+    return out;
+  }
+  for (const key of Object.keys(source)) {
+    const val = source[key];
+    if (
+      val &&
+      typeof val === "object" &&
+      !Array.isArray(val) &&
+      out[key] &&
+      typeof out[key] === "object" &&
+      !Array.isArray(out[key])
+    ) {
+      out[key] = deepMerge(out[key], val);
     } else {
-      moduleList.innerHTML = "<li>No modules currently enabled.</li>";
+      out[key] = val;
     }
+  }
+  return out;
+}
 
-    // Help preview
-    if (payload.help_message) {
-      helpText.textContent = payload.help_message;
-      const len = payload.help_length || payload.help_message.length;
-      helpCount.textContent = `${len} / 135 chars`;
-      helpCount.style.color = len <= 135 ? "var(--success)" : "red";
-    }
-
-    // Companion Connection details
-    const host = payload.host || "127.0.0.1";
-    const port = payload.port || 5000;
-    compServer.textContent = `${host}:${port} (TCP)`;
-
-    // Device Model & Radio parameters
-    const dev = payload.device_info || {};
-    const st = payload.state || {};
-    const dName = st.deviceName || dev.model || "openHop-Companion";
-    const fw = dev.ver || st.fwVersion || "";
-    deviceModel.textContent = fw ? `${dName} (v${fw})` : dName;
-
-    if (st.radio_freq) {
-      radioStatus.textContent = `${st.radio_freq} MHz (SF${st.radio_sf || 7} / BW${st.radio_bw || 62.5})`;
-    } else {
-      radioStatus.textContent = "Managed by openHop";
-    }
-
-    if (payload.rate_limit_seconds) {
-      rateLimitVal.textContent = `${payload.rate_limit_seconds}s per user`;
-    }
-  } else {
-    connBadge.textContent = "Service Starting / Idle";
-    connBadge.className = "badge badge-warning";
-    compServer.textContent = "Connecting to openHop...";
+function clearElement(el) {
+  while (el && el.firstChild) {
+    el.removeChild(el.firstChild);
   }
 }
 
-async function loadSettings() {
+let toastTimer = null;
+function showToast(msg, isError = false) {
+  const banner = document.getElementById("toast-banner");
+  if (!banner) return;
+  banner.textContent = String(msg || "");
+  banner.classList.toggle("error", Boolean(isError));
+  banner.classList.remove("hidden");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    banner.classList.add("hidden");
+  }, 4200);
+}
+
+// ------------------------------------------------------------------
+// Plugin Settings & Command Mailbox API
+// ------------------------------------------------------------------
+
+async function fetchPluginSettingsFresh() {
+  const resp = await apiGet(`/api/plugins/settings?id=${encodeURIComponent(PLUGIN_ID)}`);
+  const payload = resp.data || resp;
+  const cfg = payload.config || payload.saved || payload.defaults || {};
+  currentConfig = cfg;
+  return cfg;
+}
+
+async function savePluginConfigPatch(patchObj, successMsg = "Settings saved & hot-reloaded!") {
   try {
-    const res = await apiFetch(`/api/plugins/settings?id=${PLUGIN_ID}`);
-    if (!res.ok) {
-      showBanner(`Could not load settings (HTTP ${res.status})`, "error");
-      return;
-    }
-    const data = await res.json();
-    const config = data.saved || data.config || {};
-    cachedConfig = config;
+    const fresh = await fetchPluginSettingsFresh();
+    const merged = deepMerge(fresh, patchObj);
+    delete merged._runtime;
+    delete merged._cmd;
+    merged.schema_version = 2;
 
-    // Populate Connection & Core
-    const conn = config.connection || {};
-    document.getElementById("cfg-conn-host").value = conn.host || "127.0.0.1";
-    document.getElementById("cfg-conn-port").value = conn.tcpPort || 5051;
-
-    const core = config.core || {};
-    document.getElementById("cfg-rate-limit").value = core.perUserRateLimitSeconds || 30;
-
-    // Populate Modules
-    const mods = config.modules || {};
-
-    // 1. autoresponce
-    const auto = mods.autoresponce || {};
-    document.getElementById("cfg-mod-auto-enabled").checked = Boolean(auto.enabled);
-    document.getElementById("cfg-mod-auto-channels").value = (auto.channels || ["#test"]).join(", ");
-    document.getElementById("cfg-mod-auto-maxhops").value = auto.maxHops !== undefined ? auto.maxHops : 12;
-    document.getElementById("cfg-mod-auto-template").value = auto.responseTemplate || "@[{sender}] ACK | Path: {hops_label}";
-
-    // 2. weather_bot
-    const weather = mods.weather_bot || {};
-    document.getElementById("cfg-mod-weather-enabled").checked = Boolean(weather.enabled);
-    document.getElementById("cfg-mod-weather-channel").value = weather.channel || "#weather";
-    document.getElementById("cfg-mod-weather-cron").value = weather.cron || "0 7 * * *";
-    document.getElementById("cfg-mod-weather-lat").value = weather.latitude || 30.2672;
-    document.getElementById("cfg-mod-weather-lon").value = weather.longitude || -97.7431;
-    document.getElementById("cfg-mod-weather-alerts").checked = weather.nws_alerts !== false;
-
-    // 3. net_bot
-    const net = mods.net_bot || {};
-    document.getElementById("cfg-mod-net-enabled").checked = Boolean(net.enabled);
-    document.getElementById("cfg-mod-net-channel").value = net.channel || "#net";
-    document.getElementById("cfg-mod-net-day").value = net.day_of_week || "Tuesday";
-    document.getElementById("cfg-mod-net-time").value = net.time || "19:00";
-    document.getElementById("cfg-mod-net-dur").value = net.duration || 2;
-    document.getElementById("cfg-mod-net-keyword").value = net.keyword || "#checkin";
-
-    // 4. meshwars_bot
-    const meshwars = mods.meshwars_bot || {};
-    document.getElementById("cfg-mod-meshwars-enabled").checked = Boolean(meshwars.enabled);
-    document.getElementById("cfg-mod-meshwars-channel").value = meshwars.channel || "#meshwars";
-    document.getElementById("cfg-mod-meshwars-day").value = meshwars.day_of_week || "Saturday";
-    document.getElementById("cfg-mod-meshwars-time").value = meshwars.time || "18:00";
-    document.getElementById("cfg-mod-meshwars-dur").value = meshwars.duration || 6;
-    document.getElementById("cfg-mod-meshwars-keyword").value = meshwars.checkin_keyword || "!checkin";
-
+    await apiPost("/api/plugins/settings", {
+      id: PLUGIN_ID,
+      config: merged,
+      restart: false,
+    });
+    currentConfig = merged;
+    showToast(successMsg, false);
+    setTimeout(refreshAllTelemetry, 900);
   } catch (err) {
-    showBanner(`Failed to load configuration: ${err.message}`, "error");
+    showToast(`Save failed: ${err.message}`, true);
   }
 }
 
-async function saveSettings(event) {
-  event.preventDefault();
-  const saveBtn = document.getElementById("btn-save");
-  saveBtn.disabled = true;
-  saveBtn.textContent = "Saving & Restarting...";
-
+async function sendBotCommand(type, params = {}) {
+  const cmdId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const rawChannels = document.getElementById("cfg-mod-auto-channels").value;
-    const channels = rawChannels.split(",").map(c => c.trim()).filter(Boolean);
-
-    const newConfig = {
-      connection: {
-        host: document.getElementById("cfg-conn-host").value.trim() || "127.0.0.1",
-        tcpPort: parseInt(document.getElementById("cfg-conn-port").value, 10) || 5051
-      },
-      core: {
-        ipcPort: cachedConfig.core?.ipcPort || 5002,
-        perUserRateLimitSeconds: parseFloat(document.getElementById("cfg-rate-limit").value) || 30
-      },
-      modules: {
-        autoresponce: {
-          enabled: document.getElementById("cfg-mod-auto-enabled").checked,
-          channels: channels.length > 0 ? channels : ["#test"],
-          maxHops: parseInt(document.getElementById("cfg-mod-auto-maxhops").value, 10) || 12,
-          responseTemplate: document.getElementById("cfg-mod-auto-template").value.trim() || "@[{sender}] ACK | Path: {hops_label}"
-        },
-        weather_bot: {
-          enabled: document.getElementById("cfg-mod-weather-enabled").checked,
-          channel: document.getElementById("cfg-mod-weather-channel").value.trim() || "#weather",
-          cron: document.getElementById("cfg-mod-weather-cron").value.trim() || "0 7 * * *",
-          latitude: parseFloat(document.getElementById("cfg-mod-weather-lat").value) || 30.2672,
-          longitude: parseFloat(document.getElementById("cfg-mod-weather-lon").value) || -97.7431,
-          nws_alerts: document.getElementById("cfg-mod-weather-alerts").checked
-        },
-        net_bot: {
-          enabled: document.getElementById("cfg-mod-net-enabled").checked,
-          channel: document.getElementById("cfg-mod-net-channel").value.trim() || "#net",
-          day_of_week: document.getElementById("cfg-mod-net-day").value || "Tuesday",
-          time: document.getElementById("cfg-mod-net-time").value.trim() || "19:00",
-          duration: parseInt(document.getElementById("cfg-mod-net-dur").value, 10) || 2,
-          keyword: document.getElementById("cfg-mod-net-keyword").value.trim() || "#checkin",
-          state_file: "net_state.json"
-        },
-        meshwars_bot: {
-          enabled: document.getElementById("cfg-mod-meshwars-enabled").checked,
-          channel: document.getElementById("cfg-mod-meshwars-channel").value.trim() || "#meshwars",
-          day_of_week: document.getElementById("cfg-mod-meshwars-day").value || "Saturday",
-          time: document.getElementById("cfg-mod-meshwars-time").value.trim() || "18:00",
-          duration: parseInt(document.getElementById("cfg-mod-meshwars-dur").value, 10) || 6,
-          checkin_keyword: document.getElementById("cfg-mod-meshwars-keyword").value.trim() || "!checkin",
-          state_file: "meshwars_state.json"
-        }
-      }
+    showToast(`Sending command: ${type}...`, false);
+    const fresh = await fetchPluginSettingsFresh();
+    const payload = deepMerge({}, fresh);
+    delete payload._runtime;
+    payload._cmd = {
+      id: cmdId,
+      type: type,
+      params: params,
+      ts: Math.floor(Date.now() / 1000),
     };
 
-    // Ensure _runtime is never saved into the persistent config file
-    delete newConfig._runtime;
-
-    const res = await apiFetch("/api/plugins/settings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        id: PLUGIN_ID,
-        config: newConfig,
-        restart: true
-      })
+    await apiPost("/api/plugins/settings", {
+      id: PLUGIN_ID,
+      config: payload,
+      restart: false,
     });
 
-    if (res.ok) {
-      showBanner("Settings saved successfully! openHop is restarting the plugin...", "success", 7000);
-      cachedConfig = newConfig;
-      // Switch back to dashboard after 2 seconds
-      setTimeout(() => {
-        switchTab("dashboard");
-      }, 2000);
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      showBanner(`Failed to save settings: ${errData.detail || errData.message || res.statusText}`, "error", 8000);
+    // Poll runtime for command result (up to ~7 seconds)
+    for (let i = 0; i < 7; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      await fetchRuntimeSnapshot();
+      const results = (currentRuntime && currentRuntime.cmd_results) || [];
+      const match = results.find((r) => r && r.id === cmdId);
+      if (match) {
+        showToast(match.message || `${type} completed`, !match.ok);
+        await fetchNativeCompanionData();
+        renderAll();
+        return match;
+      }
     }
+    showToast(`Command '${type}' queued.`, false);
+    await refreshAllTelemetry();
+    return null;
   } catch (err) {
-    showBanner(`Network or save error: ${err.message}`, "error", 8000);
-  } finally {
-    saveBtn.disabled = false;
-    saveBtn.textContent = "Save Settings & Restart Plugin";
+    showToast(`Command error: ${err.message}`, true);
+    return null;
   }
 }
 
+// ------------------------------------------------------------------
+// Telemetry & Native Companion Fetching
+// ------------------------------------------------------------------
+
+async function fetchRuntimeSnapshot() {
+  try {
+    const resp = await apiGet(`/api/plugins/runtime?id=${encodeURIComponent(PLUGIN_ID)}`);
+    const outer = resp.data || resp;
+    const rt = outer.runtime || outer;
+    if (rt && Object.keys(rt).length > 0) {
+      currentRuntime = rt;
+      return rt;
+    }
+  } catch (_) {
+    // Fall back to settings _runtime mirror
+  }
+
+  try {
+    const cfg = await fetchPluginSettingsFresh();
+    if (cfg && cfg._runtime) {
+      currentRuntime = cfg._runtime;
+      return currentRuntime;
+    }
+  } catch (_) {
+    // Ignore
+  }
+  return currentRuntime;
+}
+
+async function fetchNativeCompanionData() {
+  try {
+    const listResp = await apiGet("/api/companion/");
+    const items = listResp.data || [];
+    companionList = Array.isArray(items) ? items : [];
+
+    // Match companion by public_key from runtime if not already chosen
+    const botPubKey =
+      (currentRuntime &&
+        currentRuntime.companion &&
+        currentRuntime.companion.public_key) ||
+      "";
+    if (!selectedCompanionName && companionList.length > 0) {
+      const matched = companionList.find(
+        (c) =>
+          botPubKey &&
+          c.public_key &&
+          c.public_key.toLowerCase() === botPubKey.toLowerCase()
+      );
+      selectedCompanionName = matched
+        ? matched.companion_name
+        : companionList[0].companion_name || "";
+    }
+
+    const querySuffix = selectedCompanionName
+      ? `?companion_name=${encodeURIComponent(selectedCompanionName)}`
+      : "";
+
+    const [selfResp, chResp, ctResp] = await Promise.all([
+      apiGet(`/api/companion/self_info${querySuffix}`).catch(() => null),
+      apiGet(`/api/companion/channels${querySuffix}`).catch(() => null),
+      apiGet(`/api/companion/contacts${querySuffix}`).catch(() => null),
+    ]);
+
+    if (selfResp && selfResp.data) {
+      nativeSelfInfo = selfResp.data;
+    }
+    if (chResp && Array.isArray(chResp.data)) {
+      nativeChannels = chResp.data;
+    }
+    if (ctResp && Array.isArray(ctResp.data)) {
+      nativeContacts = ctResp.data;
+    }
+  } catch (_) {
+    // Native companion API may be unavailable if no companion is configured
+  }
+}
+
+async function refreshAllTelemetry() {
+  if (!currentConfig) {
+    await fetchPluginSettingsFresh().catch(() => null);
+  }
+  await fetchRuntimeSnapshot();
+  await fetchNativeCompanionData();
+  if (!formsPopulated && currentConfig) {
+    populateFormsFromConfig(currentConfig);
+    formsPopulated = true;
+  }
+  renderAll();
+}
+
+// ------------------------------------------------------------------
+// UI Rendering (Strictly DOM / textContent)
+// ------------------------------------------------------------------
+
+function renderAll() {
+  renderTopStatus();
+  renderOverviewTab();
+  renderCompanionTab();
+  renderAutoresponderStats();
+  renderWeatherStatus();
+  renderNetConsole("net_bot", "net-status-pill", "net-roster-tbody");
+  renderNetConsole("meshwars_bot", "mw-status-pill", "mw-roster-tbody");
+}
+
+function renderTopStatus() {
+  const badge = document.getElementById("conn-badge");
+  const text = document.getElementById("conn-text");
+  const verEl = document.getElementById("plugin-version");
+  if (!badge || !text) return;
+
+  const isConn = Boolean(currentRuntime && currentRuntime.connected);
+  badge.classList.toggle("connected", isConn);
+  badge.classList.toggle("disconnected", !isConn);
+
+  const comp = (currentRuntime && currentRuntime.companion) || {};
+  if (isConn) {
+    text.textContent = `Connected: ${comp.device_name || "Companion"} (${comp.host || "127.0.0.1"}:${comp.port || 5051})`;
+  } else {
+    text.textContent = comp.last_error
+      ? `Offline (${comp.last_error})`
+      : "Companion Disconnected";
+  }
+
+  if (verEl && currentRuntime && currentRuntime.version) {
+    verEl.textContent = `v${currentRuntime.version}`;
+  }
+}
+
+function renderOverviewTab() {
+  const comp = (currentRuntime && currentRuntime.companion) || {};
+  const dev = (currentRuntime && currentRuntime.device_info) || {};
+
+  const modelEl = document.getElementById("ov-companion-model");
+  if (modelEl) {
+    modelEl.textContent = `${comp.host || "127.0.0.1"}:${comp.port || 5051}`;
+  }
+
+  const nodeName =
+    (nativeSelfInfo && nativeSelfInfo.node_name) ||
+    comp.device_name ||
+    dev.name ||
+    "—";
+  document.getElementById("ov-node-name").textContent = nodeName;
+
+  const pubKey =
+    (nativeSelfInfo && nativeSelfInfo.public_key) || comp.public_key || "";
+  document.getElementById("ov-pubkey").textContent = pubKey
+    ? `${pubKey.slice(0, 12)}...${pubKey.slice(-8)}`
+    : "—";
+
+  if (nativeSelfInfo && nativeSelfInfo.frequency_hz) {
+    const mhz = (Number(nativeSelfInfo.frequency_hz) / 1e6).toFixed(3);
+    const bw = (Number(nativeSelfInfo.bandwidth_hz || 0) / 1e3).toFixed(1);
+    document.getElementById("ov-radio-info").textContent = `${mhz} MHz | BW ${bw} kHz | SF${nativeSelfInfo.spreading_factor || "?"}`;
+  } else {
+    document.getElementById("ov-radio-info").textContent = dev.model || "Virtual Companion";
+  }
+
+  const chCount = nativeChannels.length || (comp.channels ? comp.channels.length : 0);
+  const ctCount = nativeContacts.length;
+  document.getElementById("ov-counts").textContent = `${ctCount} contacts / ${chCount} channels`;
+  document.getElementById("ov-timezone").textContent =
+    (currentRuntime && currentRuntime.timezone) ||
+    (currentConfig && currentConfig.core && currentConfig.core.timezone) ||
+    "UTC";
+
+  // Module Summary Cards
+  const mods = (currentRuntime && currentRuntime.modules) || {};
+  const modContainer = document.getElementById("ov-module-cards");
+  if (modContainer) {
+    clearElement(modContainer);
+    const defs = [
+      {
+        key: "autoresponce",
+        label: "Autoresponder",
+        sub: (m) =>
+          m.enabled
+            ? `Channels: ${(m.channels || []).join(", ")} | Matches: ${m.match_count || 0}`
+            : "Disabled",
+      },
+      {
+        key: "weather_bot",
+        label: "Weather & NWS Alerts",
+        sub: (m) =>
+          m.enabled
+            ? `${m.location || m.zipCode || "Configured"} | Channel: ${m.weatherChannel || "#weather"} | Subs: ${m.subscriber_count || 0}`
+            : "Disabled",
+      },
+      {
+        key: "net_bot",
+        label: "Weekly Radio Net",
+        sub: (m) =>
+          m.is_active
+            ? `ACTIVE NOW on ${m.channel} (${m.participant_count || 0} check-ins)`
+            : m.enabled
+            ? `${m.day_of_week} ${m.time} on ${m.channel}`
+            : "Disabled (Manual Start Available)",
+      },
+      {
+        key: "meshwars_bot",
+        label: "MeshWars Net",
+        sub: (m) =>
+          m.is_active
+            ? `ACTIVE NOW on ${m.channel} (${m.participant_count || 0} warriors)`
+            : m.enabled
+            ? `${m.day_of_week} ${m.time} on ${m.channel}`
+            : "Disabled (Manual Start Available)",
+      },
+    ];
+
+    let enabledCount = 0;
+    for (const d of defs) {
+      const m = mods[d.key] || {};
+      if (m.enabled) enabledCount++;
+      const row = document.createElement("div");
+      row.className = "mod-row";
+
+      const left = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "mod-row-title";
+      title.textContent = d.label;
+      const sub = document.createElement("div");
+      sub.className = "mod-row-sub";
+      sub.textContent = d.sub(m);
+      left.appendChild(title);
+      left.appendChild(sub);
+
+      const pill = document.createElement("span");
+      pill.className = `pill ${m.enabled || m.is_active ? "active" : ""}`;
+      pill.textContent = m.is_active ? "LIVE" : m.enabled ? "ON" : "OFF";
+
+      row.appendChild(left);
+      row.appendChild(pill);
+      modContainer.appendChild(row);
+    }
+
+    const activeCountEl = document.getElementById("ov-active-count");
+    if (activeCountEl) {
+      activeCountEl.textContent = `${enabledCount} / 4 Enabled`;
+    }
+  }
+
+  // Help preview
+  const helpStr = (currentRuntime && currentRuntime.help_message) || "MeshHub Bot ready.";
+  const helpLen = utf8ByteLength(helpStr);
+  document.getElementById("ov-help-text").textContent = helpStr;
+  document.getElementById("ov-help-len").textContent = `${helpLen} / 135 B`;
+
+  // Activity Feed
+  const pauseChk = document.getElementById("chk-pause-activity");
+  if (!pauseChk || !pauseChk.checked) {
+    renderActivityTable((currentRuntime && currentRuntime.activity) || []);
+  }
+}
+
+function renderActivityTable(items) {
+  const tbody = document.getElementById("activity-tbody");
+  if (!tbody) return;
+  clearElement(tbody);
+
+  if (!Array.isArray(items) || items.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "empty-cell";
+    td.textContent = "No recent bot activity recorded yet.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const item of items.slice(0, 30)) {
+    const tr = document.createElement("tr");
+    const cols = [
+      item.time || "—",
+      item.module || "—",
+      item.event || "—",
+      item.sender || "—",
+      item.channel || "—",
+      item.detail || "",
+    ];
+    cols.forEach((val, idx) => {
+      const td = document.createElement("td");
+      if (idx === 0) td.className = "mono";
+      td.textContent = String(val);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+function renderCompanionTab() {
+  // Companion selector dropdown
+  const sel = document.getElementById("comp-selector");
+  if (sel) {
+    clearElement(sel);
+    if (companionList.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "Default Companion";
+      sel.appendChild(opt);
+    } else {
+      for (const c of companionList) {
+        const opt = document.createElement("option");
+        opt.value = c.companion_name || "";
+        opt.textContent = `${c.node_name || c.companion_name || "Companion"} (${c.companion_hash || ""})`;
+        if (c.companion_name === selectedCompanionName) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      }
+    }
+  }
+
+  // Node name input (only set if not currently focused)
+  const nameInput = document.getElementById("comp-advert-name");
+  if (nameInput && document.activeElement !== nameInput) {
+    const currentName =
+      (nativeSelfInfo && nativeSelfInfo.node_name) ||
+      (currentRuntime && currentRuntime.companion && currentRuntime.companion.device_name) ||
+      "";
+    if (currentName) {
+      nameInput.value = currentName;
+    }
+  }
+
+  // Ad-hoc channel dropdown & channel table
+  const comp = (currentRuntime && currentRuntime.companion) || {};
+  const channels =
+    nativeChannels.length > 0
+      ? nativeChannels
+      : (comp.channels || []).map((c) => ({ index: c.index, name: c.name }));
+
+  const adhocChSel = document.getElementById("adhoc-channel");
+  if (adhocChSel && document.activeElement !== adhocChSel) {
+    const prevVal = adhocChSel.value;
+    clearElement(adhocChSel);
+    for (const ch of channels) {
+      const opt = document.createElement("option");
+      opt.value = String(ch.index);
+      opt.textContent = `[${ch.index}] ${ch.name || "Public"}`;
+      if (String(ch.index) === prevVal) opt.selected = true;
+      adhocChSel.appendChild(opt);
+    }
+  }
+
+  const adhocCtSel = document.getElementById("adhoc-contact");
+  if (adhocCtSel && document.activeElement !== adhocCtSel) {
+    const prevCt = adhocCtSel.value;
+    clearElement(adhocCtSel);
+    if (nativeContacts.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No contacts in companion store";
+      adhocCtSel.appendChild(opt);
+    } else {
+      for (const ct of nativeContacts) {
+        const opt = document.createElement("option");
+        opt.value = ct.public_key || "";
+        opt.textContent = `${ct.name || "Unknown"} (${String(ct.public_key || "").slice(0, 8)})`;
+        if (ct.public_key === prevCt) opt.selected = true;
+        adhocCtSel.appendChild(opt);
+      }
+    }
+  }
+
+  // Channels Table with module mapping
+  const tbody = document.getElementById("comp-channels-tbody");
+  if (!tbody) return;
+  clearElement(tbody);
+
+  const mods = (currentRuntime && currentRuntime.modules) || {};
+  const usageMap = {};
+  const addUsage = (chName, label) => {
+    if (!chName) return;
+    const norm = String(chName).trim().toLowerCase().replace(/^#/, "");
+    if (!usageMap[norm]) usageMap[norm] = [];
+    usageMap[norm].push(label);
+  };
+
+  if (mods.autoresponce && mods.autoresponce.enabled) {
+    (mods.autoresponce.channels || []).forEach((c) => addUsage(c, "Autoresponder"));
+  }
+  if (mods.weather_bot && mods.weather_bot.enabled) {
+    addUsage(mods.weather_bot.weatherChannel, "Weather Forecast");
+    if (mods.weather_bot.alertsChannel !== mods.weather_bot.weatherChannel) {
+      addUsage(mods.weather_bot.alertsChannel, "Weather Alerts");
+    }
+  }
+  if (mods.net_bot && (mods.net_bot.enabled || mods.net_bot.is_active)) {
+    addUsage(mods.net_bot.channel, "Radio Net");
+  }
+  if (mods.meshwars_bot && (mods.meshwars_bot.enabled || mods.meshwars_bot.is_active)) {
+    addUsage(mods.meshwars_bot.channel, "MeshWars");
+  }
+
+  if (channels.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "empty-cell";
+    td.textContent = "No channels reported yet.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const ch of channels) {
+    const tr = document.createElement("tr");
+    const norm = String(ch.name || "").trim().toLowerCase().replace(/^#/, "");
+    const usedBy = usageMap[norm] || [];
+
+    const tdIdx = document.createElement("td");
+    tdIdx.className = "mono";
+    tdIdx.textContent = `Slot ${ch.index}`;
+
+    const tdName = document.createElement("td");
+    tdName.textContent = ch.name || (ch.index === 0 ? "Public" : "—");
+
+    const tdUsed = document.createElement("td");
+    tdUsed.textContent = usedBy.length > 0 ? usedBy.join(", ") : "—";
+
+    const tdStatus = document.createElement("td");
+    const pill = document.createElement("span");
+    pill.className = `pill ${usedBy.length > 0 ? "active" : ""}`;
+    pill.textContent = usedBy.length > 0 ? "Bot Monitored" : "Companion Channel";
+    tdStatus.appendChild(pill);
+
+    tr.appendChild(tdIdx);
+    tr.appendChild(tdName);
+    tr.appendChild(tdUsed);
+    tr.appendChild(tdStatus);
+    tbody.appendChild(tr);
+  }
+}
+
+function renderAutoresponderStats() {
+  const ar =
+    (currentRuntime && currentRuntime.modules && currentRuntime.modules.autoresponce) || {};
+  const badge = document.getElementById("ar-match-badge");
+  if (badge) {
+    badge.textContent = `${ar.match_count || 0} Matches`;
+  }
+}
+
+function renderWeatherStatus() {
+  const wx =
+    (currentRuntime && currentRuntime.modules && currentRuntime.modules.weather_bot) || {};
+
+  const locPill = document.getElementById("wx-loc-pill");
+  if (locPill) {
+    locPill.textContent = wx.location || wx.zipCode || "Unconfigured";
+  }
+
+  // Subscribers Table
+  const subs = Array.isArray(wx.subscribers) ? wx.subscribers : [];
+  const subCountEl = document.getElementById("wx-sub-count");
+  if (subCountEl) {
+    subCountEl.textContent = `${subs.length} Subscriber${subs.length === 1 ? "" : "s"}`;
+  }
+
+  const subsTbody = document.getElementById("wx-subs-tbody");
+  if (subsTbody) {
+    clearElement(subsTbody);
+    if (subs.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 4;
+      td.className = "empty-cell";
+      td.textContent = "No DM forecast subscribers yet.";
+      tr.appendChild(td);
+      subsTbody.appendChild(tr);
+    } else {
+      for (const s of subs) {
+        const rec = s.recipient || s.publicKeyHex || "";
+        const tr = document.createElement("tr");
+
+        const tdRec = document.createElement("td");
+        tdRec.textContent = rec;
+        const tdZip = document.createElement("td");
+        tdZip.className = "mono";
+        tdZip.textContent = s.zipCode || "—";
+        const tdLoc = document.createElement("td");
+        tdLoc.textContent = s.displayName || "—";
+        const tdAct = document.createElement("td");
+
+        const btnRm = document.createElement("button");
+        btnRm.type = "button";
+        btnRm.className = "btn btn-danger btn-sm";
+        btnRm.textContent = "Remove";
+        btnRm.addEventListener("click", () => {
+          sendBotCommand("weather_sub_remove", { recipient: rec });
+        });
+        tdAct.appendChild(btnRm);
+
+        tr.appendChild(tdRec);
+        tr.appendChild(tdZip);
+        tr.appendChild(tdLoc);
+        tr.appendChild(tdAct);
+        subsTbody.appendChild(tr);
+      }
+    }
+  }
+
+  // Active Alerts Box
+  const alerts = Array.isArray(wx.active_alerts) ? wx.active_alerts : [];
+  const alertCountEl = document.getElementById("wx-active-alerts-count");
+  if (alertCountEl) {
+    alertCountEl.textContent = `${alerts.length} Active`;
+  }
+  const alertsBox = document.getElementById("wx-active-alerts-list");
+  if (alertsBox) {
+    clearElement(alertsBox);
+    if (alerts.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-cell";
+      p.textContent = "No active severe weather alerts for this location.";
+      alertsBox.appendChild(p);
+    } else {
+      for (const a of alerts) {
+        const row = document.createElement("div");
+        row.className = "mod-row mb-12";
+        const left = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "mod-row-title";
+        title.textContent = `⚠️ ${a.event || "Alert"} (${a.severity || "Severe"})`;
+        const sub = document.createElement("div");
+        sub.className = "mod-row-sub";
+        sub.textContent = `${a.region || ""} | Until: ${a.end || "N/A"}`;
+        left.appendChild(title);
+        left.appendChild(sub);
+        row.appendChild(left);
+        alertsBox.appendChild(row);
+      }
+    }
+  }
+}
+
+function renderNetConsole(moduleKey, pillId, tbodyId) {
+  const m =
+    (currentRuntime && currentRuntime.modules && currentRuntime.modules[moduleKey]) || {};
+  const pill = document.getElementById(pillId);
+  if (pill) {
+    const isAct = Boolean(m.is_active);
+    pill.classList.toggle("active", isAct);
+    pill.textContent = isAct
+      ? `ACTIVE (${m.participant_count || 0} Checked In)`
+      : m.enabled
+      ? `SCHEDULED (${m.day_of_week || ""} ${m.time || ""})`
+      : "STANDBY";
+  }
+
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  clearElement(tbody);
+
+  const participants = Array.isArray(m.participants) ? m.participants : [];
+  if (participants.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "empty-cell";
+    td.textContent = m.is_active
+      ? `Net is open on ${m.channel || "channel"} — waiting for check-ins (${m.keyword || ""})...`
+      : "No check-ins in current session.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  participants.forEach((p, idx) => {
+    const tr = document.createElement("tr");
+    const tdNum = document.createElement("td");
+    tdNum.className = "mono";
+    tdNum.textContent = String(idx + 1);
+
+    const tdName = document.createElement("td");
+    tdName.textContent = p.sender || String(p);
+
+    const tdTime = document.createElement("td");
+    tdTime.className = "mono";
+    tdTime.textContent = p.timestamp || "—";
+
+    const tdRadio = document.createElement("td");
+    const snr = p.snr !== undefined && p.snr !== null ? `${p.snr} dB` : "N/A";
+    const hops = p.hops !== undefined && p.hops !== null ? `${p.hops} hops` : "0 hops";
+    tdRadio.textContent = `${snr} | ${hops}`;
+
+    tr.appendChild(tdNum);
+    tr.appendChild(tdName);
+    tr.appendChild(tdTime);
+    tr.appendChild(tdRadio);
+    tbody.appendChild(tr);
+  });
+}
+
+// ------------------------------------------------------------------
+// Form Population & Submit Handlers
+// ------------------------------------------------------------------
+
+function populateFormsFromConfig(cfg) {
+  if (!cfg) return;
+  const conn = cfg.connection || {};
+  const core = cfg.core || {};
+  const mods = cfg.modules || {};
+
+  // Core & Connection
+  document.getElementById("cfg-conn-host").value = conn.host || "127.0.0.1";
+  document.getElementById("cfg-conn-port").value = conn.tcpPort || 5051;
+  document.getElementById("cfg-core-tz").value =
+    core.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  document.getElementById("cfg-core-ratelimit").value =
+    core.perUserRateLimitSeconds !== undefined ? core.perUserRateLimitSeconds : 30;
+  document.getElementById("cfg-core-txlimit").value =
+    core.txRateLimitSeconds !== undefined ? core.txRateLimitSeconds : 1.5;
+  document.getElementById("cfg-core-activity").checked = core.activityLog !== false;
+
+  // Autoresponder
+  const ar = mods.autoresponce || {};
+  document.getElementById("cfg-ar-enabled").checked = Boolean(ar.enabled);
+  document.getElementById("cfg-ar-channels").value = Array.isArray(ar.channels)
+    ? ar.channels.join(", ")
+    : ar.channels || "#test";
+  document.getElementById("cfg-ar-keywords").value = Array.isArray(ar.keywords)
+    ? ar.keywords.join(", ")
+    : ar.keywords || "test, ping, ack";
+  document.getElementById("cfg-ar-maxhops").value =
+    ar.maxHops !== undefined && ar.maxHops !== null ? ar.maxHops : 12;
+  const arTpl = ar.responseTemplate || "@[{sender}] ACK | Path: {hops_label}";
+  document.getElementById("cfg-ar-template").value = arTpl;
+  updateByteCounter("cfg-ar-template", "ar-tpl-bytes");
+
+  // Weather
+  const wx = mods.weather_bot || {};
+  document.getElementById("cfg-wx-enabled").checked = Boolean(wx.enabled);
+  document.getElementById("cfg-wx-zip").value = wx.zipCode || "";
+  document.getElementById("cfg-wx-lat").value =
+    wx.latitude !== undefined ? wx.latitude : 38.9072;
+  document.getElementById("cfg-wx-lon").value =
+    wx.longitude !== undefined ? wx.longitude : -77.0369;
+  document.getElementById("cfg-wx-wchan").value =
+    wx.weatherChannel || wx.channel || "#weather";
+  document.getElementById("cfg-wx-achan").value =
+    wx.alertsChannel || wx.channel || "#weather";
+  document.getElementById("cfg-wx-alarm").value =
+    wx.weatherAlarm || wx.cron || "0 7 * * *";
+  document.getElementById("cfg-wx-poll").value = wx.alertPollSeconds || 300;
+  document.getElementById("cfg-wx-nws-alerts").checked = wx.nws_alerts !== false;
+  document.getElementById("cfg-wx-ign-sev").value = Array.isArray(wx.ignore_severities)
+    ? wx.ignore_severities.join(", ")
+    : "Minor, Unknown";
+  document.getElementById("cfg-wx-ign-ev").value = Array.isArray(wx.ignore_events)
+    ? wx.ignore_events.join(", ")
+    : "";
+  document.getElementById("cfg-wx-alert-tpl").value =
+    wx.alertTemplate || "⚠️ {event} ({severity}) for {region} until {end}: {headline}";
+  document.getElementById("cfg-wx-clear-tpl").value =
+    wx.clearTemplate || "🟢 CLEAR: {event} has ended for {region}.";
+
+  // Radio Net
+  const net = mods.net_bot || {};
+  document.getElementById("cfg-net-enabled").checked = Boolean(net.enabled);
+  document.getElementById("cfg-net-channel").value = net.channel || "#net";
+  document.getElementById("cfg-net-keyword").value = net.keyword || "#checkin";
+  document.getElementById("cfg-net-day").value = net.day_of_week || "Tuesday";
+  document.getElementById("cfg-net-time").value = net.time || "19:00";
+  document.getElementById("cfg-net-duration").value = net.duration || 2;
+  document.getElementById("cfg-net-reminders").checked = net.enable_reminders !== false;
+  document.getElementById("cfg-net-open-msg").value =
+    net.opening_message || "Weekly Net is now OPEN! Send {keyword} to check in.";
+  document.getElementById("cfg-net-ack-msg").value =
+    net.checkin_ack_template || "Welcome {sender}, {count} {user_str} {have_str} checked in.";
+  document.getElementById("cfg-net-close-msg").value =
+    net.closing_message ||
+    "Weekly Net is now CLOSED. Total check-ins: {count}. Thank you for participating!";
+
+  // MeshWars
+  const mw = mods.meshwars_bot || {};
+  document.getElementById("cfg-mw-enabled").checked = Boolean(mw.enabled);
+  document.getElementById("cfg-mw-channel").value = mw.channel || "#meshwars";
+  document.getElementById("cfg-mw-keyword").value = mw.checkin_keyword || "!checkin";
+  document.getElementById("cfg-mw-day").value = mw.day_of_week || "Saturday";
+  document.getElementById("cfg-mw-time").value = mw.time || "18:00";
+  document.getElementById("cfg-mw-duration").value = mw.duration || 6;
+  document.getElementById("cfg-mw-reminders").checked = mw.enable_reminders !== false;
+  document.getElementById("cfg-mw-hourly").checked = mw.enable_hourly_message !== false;
+  document.getElementById("cfg-mw-midupdates").checked = mw.enable_mid_net_updates !== false;
+  document.getElementById("cfg-mw-open-msg").value =
+    mw.opening_message ||
+    "Welcome to the MeshWars net! Send !checkin or any chat message to participate.";
+  document.getElementById("cfg-mw-hourly-msg").value =
+    mw.hourly_message ||
+    "Register on https://meshwars.com and any message sent in this chat counts toward your bonus points.";
+  document.getElementById("cfg-mw-ack-msg").value =
+    mw.checkin_ack_template || "Welcome {sender}, {count} {user_str} {have_str} checked in.";
+  document.getElementById("cfg-mw-close-msg").value =
+    mw.closing_message ||
+    "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today.";
+}
+
+function updateByteCounter(inputId, counterId) {
+  const input = document.getElementById(inputId);
+  const counter = document.getElementById(counterId);
+  if (!input || !counter) return;
+  const len = utf8ByteLength(input.value);
+  counter.textContent = `${len} / ${MAX_LORA_BYTES} B`;
+  counter.classList.toggle("over", len > MAX_LORA_BYTES);
+}
+
+// ------------------------------------------------------------------
+// Event Listeners Setup
+// ------------------------------------------------------------------
+
+function setupEventListeners() {
+  // Tabs
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-tab");
+      document.querySelectorAll(".tab-btn").forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle("active", active);
+        b.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === targetId);
+      });
+    });
+  });
+
+  // Top Refresh
+  document.getElementById("btn-refresh-now").addEventListener("click", () => {
+    refreshAllTelemetry();
+    showToast("Telemetry refreshed.", false);
+  });
+
+  // Overview quick buttons
+  document.getElementById("btn-ov-advert").addEventListener("click", () => {
+    sendBotCommand("send_advert", {});
+  });
+  document.getElementById("btn-ov-provision").addEventListener("click", () => {
+    sendBotCommand("channels_provision", {});
+  });
+  document.getElementById("btn-comp-provision").addEventListener("click", () => {
+    sendBotCommand("channels_provision", {});
+  });
+
+  // Companion selector change
+  document.getElementById("comp-selector").addEventListener("change", (e) => {
+    selectedCompanionName = e.target.value;
+    fetchNativeCompanionData().then(renderAll);
+  });
+
+  // Native Companion Rename
+  document.getElementById("btn-comp-rename").addEventListener("click", async () => {
+    const newName = document.getElementById("comp-advert-name").value.trim();
+    if (!newName) {
+      showToast("Enter a valid node name.", true);
+      return;
+    }
+    try {
+      const body = { advert_name: newName };
+      if (selectedCompanionName) body.companion_name = selectedCompanionName;
+      await apiPost("/api/companion/set_advert_name", body);
+      showToast(`Renamed Virtual Companion to '${newName}'`, false);
+      await fetchNativeCompanionData();
+      renderAll();
+    } catch (err) {
+      showToast(`Rename failed: ${err.message}`, true);
+    }
+  });
+
+  // Ad-hoc sender mode switch & byte counter
+  document.getElementById("adhoc-mode").addEventListener("change", (e) => {
+    const isDm = e.target.value === "dm";
+    document.getElementById("adhoc-chan-wrap").classList.toggle("hidden", isDm);
+    document.getElementById("adhoc-dm-wrap").classList.toggle("hidden", !isDm);
+  });
+
+  document.getElementById("adhoc-text").addEventListener("input", () => {
+    updateByteCounter("adhoc-text", "adhoc-bytes");
+  });
+  document.getElementById("cfg-ar-template").addEventListener("input", () => {
+    updateByteCounter("cfg-ar-template", "ar-tpl-bytes");
+  });
+
+  // Ad-hoc send via Native Companion API
+  document.getElementById("btn-adhoc-send").addEventListener("click", async () => {
+    const mode = document.getElementById("adhoc-mode").value;
+    const rawText = document.getElementById("adhoc-text").value.trim();
+    if (!rawText) {
+      showToast("Enter message text to transmit.", true);
+      return;
+    }
+    const text = clampLoraUtf8(rawText, MAX_LORA_BYTES);
+    try {
+      if (mode === "channel") {
+        const chIdx = Number(document.getElementById("adhoc-channel").value || 0);
+        const body = { channel_idx: chIdx, text: text };
+        if (selectedCompanionName) body.companion_name = selectedCompanionName;
+        await apiPost("/api/companion/send_channel_message", body);
+        showToast(`Sent to channel slot ${chIdx}`, false);
+      } else {
+        const pubKey = document.getElementById("adhoc-contact").value;
+        if (!pubKey) {
+          showToast("Select a contact recipient.", true);
+          return;
+        }
+        const body = { pub_key: pubKey, text: text };
+        if (selectedCompanionName) body.companion_name = selectedCompanionName;
+        await apiPost("/api/companion/send_text", body);
+        showToast("Direct message transmitted.", false);
+      }
+      document.getElementById("adhoc-text").value = "";
+      updateByteCounter("adhoc-text", "adhoc-bytes");
+    } catch (err) {
+      showToast(`Transmit failed: ${err.message}`, true);
+    }
+  });
+
+  // Browser Timezone Auto-Detect
+  document.getElementById("btn-detect-tz").addEventListener("click", () => {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    document.getElementById("cfg-core-tz").value = tz;
+    showToast(`Detected browser timezone: ${tz}`, false);
+  });
+
+  // Form 1: Core & Connection
+  document.getElementById("form-core").addEventListener("submit", (e) => {
+    e.preventDefault();
+    savePluginConfigPatch({
+      connection: {
+        host: document.getElementById("cfg-conn-host").value.trim() || "127.0.0.1",
+        tcpPort: Number(document.getElementById("cfg-conn-port").value || 5051),
+      },
+      core: {
+        timezone: document.getElementById("cfg-core-tz").value.trim() || "UTC",
+        perUserRateLimitSeconds: Number(
+          document.getElementById("cfg-core-ratelimit").value || 30
+        ),
+        txRateLimitSeconds: Number(document.getElementById("cfg-core-txlimit").value || 1.5),
+        activityLog: document.getElementById("cfg-core-activity").checked,
+      },
+    });
+  });
+
+  // Form 2: Autoresponder
+  document.getElementById("form-autoresponder").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const channels = document
+      .getElementById("cfg-ar-channels")
+      .value.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const keywords = document
+      .getElementById("cfg-ar-keywords")
+      .value.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    savePluginConfigPatch({
+      modules: {
+        autoresponce: {
+          enabled: document.getElementById("cfg-ar-enabled").checked,
+          channels: channels.length ? channels : ["#test"],
+          keywords: keywords.length ? keywords : ["test"],
+          maxHops: Number(document.getElementById("cfg-ar-maxhops").value || 12),
+          responseTemplate: document.getElementById("cfg-ar-template").value.trim(),
+        },
+      },
+    });
+  });
+
+  // Weather triggers & subscriber add
+  document.getElementById("btn-wx-broadcast-now").addEventListener("click", () => {
+    sendBotCommand("weather_broadcast_now", {});
+  });
+  document.getElementById("btn-wx-alerts-now").addEventListener("click", () => {
+    sendBotCommand("weather_check_alerts_now", {});
+  });
+  document.getElementById("btn-wx-sub-add").addEventListener("click", () => {
+    const rec = document.getElementById("wx-add-recipient").value.trim();
+    const zip = document.getElementById("wx-add-zip").value.trim();
+    if (!rec || !/^\d{5}$/.test(zip)) {
+      showToast("Enter a recipient name/key and a 5-digit US ZIP code.", true);
+      return;
+    }
+    sendBotCommand("weather_sub_add", { recipient: rec, zipCode: zip }).then((res) => {
+      if (res && res.ok) {
+        document.getElementById("wx-add-recipient").value = "";
+        document.getElementById("wx-add-zip").value = "";
+      }
+    });
+  });
+
+  // Form 3: Weather
+  document.getElementById("form-weather").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const ignSev = document
+      .getElementById("cfg-wx-ign-sev")
+      .value.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const ignEv = document
+      .getElementById("cfg-wx-ign-ev")
+      .value.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const wChan = document.getElementById("cfg-wx-wchan").value.trim() || "#weather";
+    const aChan = document.getElementById("cfg-wx-achan").value.trim() || wChan;
+
+    savePluginConfigPatch({
+      modules: {
+        weather_bot: {
+          enabled: document.getElementById("cfg-wx-enabled").checked,
+          zipCode: document.getElementById("cfg-wx-zip").value.trim(),
+          latitude: Number(document.getElementById("cfg-wx-lat").value || 38.9072),
+          longitude: Number(document.getElementById("cfg-wx-lon").value || -77.0369),
+          weatherChannel: wChan,
+          alertsChannel: aChan,
+          channel: wChan,
+          weatherAlarm: document.getElementById("cfg-wx-alarm").value.trim() || "0 7 * * *",
+          alertPollSeconds: Number(document.getElementById("cfg-wx-poll").value || 300),
+          nws_alerts: document.getElementById("cfg-wx-nws-alerts").checked,
+          ignore_severities: ignSev,
+          ignore_events: ignEv,
+          alertTemplate: document.getElementById("cfg-wx-alert-tpl").value.trim(),
+          clearTemplate: document.getElementById("cfg-wx-clear-tpl").value.trim(),
+        },
+      },
+    });
+  });
+
+  // Radio Net action buttons & form
+  document.getElementById("btn-net-start").addEventListener("click", () => {
+    sendBotCommand("net_start", { module: "net_bot" });
+  });
+  document.getElementById("btn-net-stop").addEventListener("click", () => {
+    sendBotCommand("net_stop", { module: "net_bot" });
+  });
+  document.getElementById("btn-net-announce").addEventListener("click", () => {
+    sendBotCommand("net_announce", { module: "net_bot" });
+  });
+  document.getElementById("btn-net-clear").addEventListener("click", () => {
+    sendBotCommand("net_clear", { module: "net_bot" });
+  });
+
+  document.getElementById("form-net").addEventListener("submit", (e) => {
+    e.preventDefault();
+    savePluginConfigPatch({
+      modules: {
+        net_bot: {
+          enabled: document.getElementById("cfg-net-enabled").checked,
+          channel: document.getElementById("cfg-net-channel").value.trim() || "#net",
+          keyword: document.getElementById("cfg-net-keyword").value.trim() || "#checkin",
+          day_of_week: document.getElementById("cfg-net-day").value,
+          time: document.getElementById("cfg-net-time").value || "19:00",
+          duration: Number(document.getElementById("cfg-net-duration").value || 2),
+          enable_reminders: document.getElementById("cfg-net-reminders").checked,
+          opening_message: document.getElementById("cfg-net-open-msg").value.trim(),
+          checkin_ack_template: document.getElementById("cfg-net-ack-msg").value.trim(),
+          closing_message: document.getElementById("cfg-net-close-msg").value.trim(),
+        },
+      },
+    });
+  });
+
+  // MeshWars action buttons & form
+  document.getElementById("btn-mw-start").addEventListener("click", () => {
+    sendBotCommand("net_start", { module: "meshwars_bot" });
+  });
+  document.getElementById("btn-mw-stop").addEventListener("click", () => {
+    sendBotCommand("net_stop", { module: "meshwars_bot" });
+  });
+  document.getElementById("btn-mw-announce").addEventListener("click", () => {
+    sendBotCommand("net_announce", { module: "meshwars_bot" });
+  });
+  document.getElementById("btn-mw-clear").addEventListener("click", () => {
+    sendBotCommand("net_clear", { module: "meshwars_bot" });
+  });
+
+  document.getElementById("form-meshwars").addEventListener("submit", (e) => {
+    e.preventDefault();
+    savePluginConfigPatch({
+      modules: {
+        meshwars_bot: {
+          enabled: document.getElementById("cfg-mw-enabled").checked,
+          channel: document.getElementById("cfg-mw-channel").value.trim() || "#meshwars",
+          checkin_keyword: document.getElementById("cfg-mw-keyword").value.trim() || "!checkin",
+          day_of_week: document.getElementById("cfg-mw-day").value,
+          time: document.getElementById("cfg-mw-time").value || "18:00",
+          duration: Number(document.getElementById("cfg-mw-duration").value || 6),
+          enable_reminders: document.getElementById("cfg-mw-reminders").checked,
+          enable_hourly_message: document.getElementById("cfg-mw-hourly").checked,
+          enable_mid_net_updates: document.getElementById("cfg-mw-midupdates").checked,
+          opening_message: document.getElementById("cfg-mw-open-msg").value.trim(),
+          hourly_message: document.getElementById("cfg-mw-hourly-msg").value.trim(),
+          checkin_ack_template: document.getElementById("cfg-mw-ack-msg").value.trim(),
+          closing_message: document.getElementById("cfg-mw-close-msg").value.trim(),
+        },
+      },
+    });
+  });
+}
+
+// ------------------------------------------------------------------
+// Initialization
+// ------------------------------------------------------------------
+
 document.addEventListener("DOMContentLoaded", () => {
-  updateDashboard();
-  setInterval(updateDashboard, 3000);
+  setupEventListeners();
+  refreshAllTelemetry();
+  setInterval(refreshAllTelemetry, 4500);
 });

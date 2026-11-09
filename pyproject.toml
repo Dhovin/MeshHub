@@ -1,43 +1,38 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "openhop-meshhub-bot"
-version = "1.0.8"
-description = "Bot & Community Automation Suite for openHop Repeater (Weather, Nets, MeshWars, Autoresponder)"
+version = "2.0.0"
+description = "MeshHub Bot plugin for openHop Repeater with Virtual Companion integration, Autoresponder, US NWS Weather & Alerts, Radio Nets, and MeshWars."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = {text = "MIT"}
 authors = [
-    {name = "MeshHub Developers"}
+    {name = "Dhovin"}
 ]
 dependencies = [
-    "meshcore>=2.0.0",
-    "requests>=2.28.0",
+    "meshcore>=2.2.0",
+    "requests>=2.31.0",
+    "croniter>=2.0.0",
+    "pytz>=2024.1",
 ]
 
 [project.scripts]
-openhop-meshhub-bot = "openhop_meshhub_bot.main:main"
+meshhub-bot = "openhop_meshhub_bot.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["openhop_meshhub_bot*"]
 
-[tool.setuptools.package-data]
-"openhop_meshhub_bot" = [
-    "share/openhop/plugins/openhop.meshhub-bot/*",
-    "share/openhop/plugins/openhop.meshhub-bot/ui/*"
-]
-
 [tool.setuptools.data-files]
 "share/openhop/plugins/openhop.meshhub-bot" = [
     "openhop-plugin.json",
     "config.default.json",
-    "schema.json"
 ]
 "share/openhop/plugins/openhop.meshhub-bot/ui" = [
     "ui/index.html",
     "ui/app.js",
-    "ui/styles.css"
+    "ui/styles.css",
 ]
