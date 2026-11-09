@@ -16,22 +16,66 @@ let formsPopulated = false;
 // Auth & HTTP Helpers
 // ------------------------------------------------------------------
 
+function getJwtToken() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryToken = urlParams.get("token");
+    if (queryToken && queryToken.trim()) {
+      const clean = queryToken.trim();
+      window.localStorage.setItem("pymc_jwt_token", clean);
+      return clean;
+    }
+  } catch (_) {
+    // Ignore URL/storage access errors
+  }
+
+  const keys = [
+    "pymc_jwt_token",
+    "token",
+    "auth_token",
+    "openhop_token",
+    "jwt",
+    "access_token",
+  ];
+  const storages = [];
+  try {
+    if (window.localStorage) storages.push(window.localStorage);
+  } catch (_) {}
+  try {
+    if (window.sessionStorage) storages.push(window.sessionStorage);
+  } catch (_) {}
+  try {
+    if (window.parent && window.parent !== window && window.parent.localStorage) {
+      storages.push(window.parent.localStorage);
+    }
+  } catch (_) {}
+  try {
+    if (window.opener && window.opener.localStorage) {
+      storages.push(window.opener.localStorage);
+    }
+  } catch (_) {}
+
+  for (const store of storages) {
+    for (const k of keys) {
+      try {
+        const val = store.getItem(k);
+        if (val && typeof val === "string" && val.trim()) {
+          return val.trim().replace(/^["']|["']$/g, "");
+        }
+      } catch (_) {}
+    }
+  }
+  return "";
+}
+
 function getAuthHeaders() {
   const headers = {
     Accept: "application/json",
     "Content-Type": "application/json",
   };
-  const keys = ["token", "auth_token", "openhop_token", "jwt", "access_token"];
-  for (const k of keys) {
-    try {
-      const val = window.localStorage.getItem(k);
-      if (val && typeof val === "string" && val.trim()) {
-        headers.Authorization = `Bearer ${val.trim().replace(/^["']|["']$/g, "")}`;
-        break;
-      }
-    } catch (_) {
-      // Ignore storage access errors
-    }
+  const token = getJwtToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
   return headers;
 }
@@ -41,6 +85,7 @@ async function apiGet(url) {
     method: "GET",
     headers: getAuthHeaders(),
     credentials: "same-origin",
+    cache: "no-store",
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} on ${url}`);
@@ -895,6 +940,35 @@ function populateFormsFromConfig(cfg) {
     "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today.";
 }
 
+function exportRosterCsv(moduleKey, filename) {
+  const m =
+    (currentRuntime && currentRuntime.modules && currentRuntime.modules[moduleKey]) || {};
+  const participants = Array.isArray(m.participants) ? m.participants : [];
+  if (participants.length === 0) {
+    showToast("No participants in roster to export.", true);
+    return;
+  }
+  const rows = [["#", "Sender", "Timestamp", "SNR_dB", "Hops"]];
+  participants.forEach((p, idx) => {
+    const sender = String(p.sender || p || "").replace(/"/g, '""');
+    const ts = String(p.timestamp || "").replace(/"/g, '""');
+    const snr = p.snr !== undefined && p.snr !== null ? String(p.snr) : "";
+    const hops = p.hops !== undefined && p.hops !== null ? String(p.hops) : "0";
+    rows.push([String(idx + 1), `"${sender}"`, `"${ts}"`, snr, hops]);
+  });
+  const csvContent = rows.map((r) => r.join(",")).join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${participants.length} participants to ${filename}`, false);
+}
+
 function updateByteCounter(inputId, counterId) {
   const input = document.getElementById(inputId);
   const counter = document.getElementById(counterId);
@@ -1139,6 +1213,9 @@ function setupEventListeners() {
   document.getElementById("btn-net-clear").addEventListener("click", () => {
     sendBotCommand("net_clear", { module: "net_bot" });
   });
+  document.getElementById("btn-net-export").addEventListener("click", () => {
+    exportRosterCsv("net_bot", "radio_net_roster.csv");
+  });
 
   document.getElementById("form-net").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1172,6 +1249,9 @@ function setupEventListeners() {
   });
   document.getElementById("btn-mw-clear").addEventListener("click", () => {
     sendBotCommand("net_clear", { module: "meshwars_bot" });
+  });
+  document.getElementById("btn-mw-export").addEventListener("click", () => {
+    exportRosterCsv("meshwars_bot", "meshwars_roster.csv");
   });
 
   document.getElementById("form-meshwars").addEventListener("submit", (e) => {

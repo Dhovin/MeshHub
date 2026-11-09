@@ -6,6 +6,7 @@ import os
 import unittest
 import zipfile
 
+from openhop_meshhub_bot import __version__
 from openhop_meshhub_bot.config import DEFAULT_CONFIG
 
 
@@ -30,7 +31,7 @@ class TestPackagingAndManifest(unittest.TestCase):
         self.assertEqual(set(manifest.keys()), allowed_keys)
         self.assertEqual(manifest["schema"], 1)
         self.assertEqual(manifest["id"], "openhop.meshhub-bot")
-        self.assertEqual(manifest["version"], "2.0.0")
+        self.assertEqual(manifest["version"], __version__)
         self.assertEqual(manifest["runtime"], {"type": "python", "entrypoint": "meshhub-bot"})
         self.assertEqual(manifest["ui"], {"type": "application", "entry": "ui/index.html"})
 
@@ -48,9 +49,10 @@ class TestPackagingAndManifest(unittest.TestCase):
         self.assertNotIn("innerHTML", js)
         self.assertNotIn("outerHTML", js)
         self.assertNotIn("insertAdjacentHTML", js)
+        self.assertIn("pymc_jwt_token", js)
 
     def test_built_wheel_has_single_manifest_and_single_ui_tree(self):
-        wheels = sorted(glob.glob("dist/openhop_meshhub_bot-2.0.0-*.whl"))
+        wheels = sorted(glob.glob(f"dist/openhop_meshhub_bot-{__version__}-*.whl"))
         if not wheels:
             return
         whl_path = wheels[-1]
