@@ -1,5 +1,6 @@
 """Unit tests for Autoresponder, WeatherBot, and NetSessionEngine modules."""
 
+import asyncio
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -35,6 +36,7 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
             await ar.on_message(
                 {"sender": "Alice", "text": "PING CHECK", "channel": "#test", "hops": 2}
             )
+            await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 1)
             self.assertEqual(sent[0][2], "@[Alice] ACK (2 hops)")
 
@@ -42,6 +44,7 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
             await ar.on_message(
                 {"sender": "Charlie", "text": "aCk please", "channel": "#test", "hops": 0}
             )
+            await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 2)
             self.assertEqual(sent[1][2], "@[Charlie] ACK (Direct (0 hops))")
 
@@ -49,6 +52,7 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
             await ar.on_message(
                 {"sender": "Bob", "text": "ping check", "channel": "#test", "hops": 6}
             )
+            await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 2)
 
     async def test_weather_bot_bare_zipcode_in_channel_and_default_location(self):
@@ -75,6 +79,7 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                 await wx.on_message(
                     {"sender": "Alice", "text": "76131", "channel": "#weather", "hops": 1}
                 )
+                await asyncio.sleep(0.05)
                 self.assertEqual(len(sent), 1)
                 self.assertIn("Wx 76131", sent[0][2])
 
@@ -87,6 +92,7 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                         "hops": 1,
                     }
                 )
+                await asyncio.sleep(0.05)
                 self.assertEqual(len(sent), 2)
                 self.assertIn("Wx 76131", sent[1][2])
 
