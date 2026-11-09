@@ -30,6 +30,22 @@
       </div>
     </header>
 
+    <!-- Inline openHop Auth Sign-In Banner (shown automatically on HTTP 401 in new tabs) -->
+    <section id="auth-card" class="auth-banner hidden" role="dialog" aria-labelledby="auth-title">
+      <div class="auth-banner-content">
+        <div>
+          <h2 id="auth-title">Sign In to openHop Repeater</h2>
+          <p class="card-sub">Your openHop session token was not shared with this browser tab. Sign in once to unlock live bot telemetry &amp; settings.</p>
+        </div>
+        <form id="form-auth-login" class="auth-form">
+          <input type="text" id="auth-username" placeholder="Username (e.g. admin)" autocomplete="username" required />
+          <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+          <button type="submit" class="btn btn-primary" id="btn-auth-submit">Sign In</button>
+        </form>
+      </div>
+      <p id="auth-error-msg" class="auth-error hidden"></p>
+    </section>
+
     <!-- Navigation Tabs -->
     <nav class="tab-nav" role="tablist" aria-label="MeshHub Bot Sections">
       <button type="button" class="tab-btn active" data-tab="tab-overview" role="tab" aria-selected="true">Overview</button>
@@ -37,7 +53,6 @@
       <button type="button" class="tab-btn" data-tab="tab-autoresponder" role="tab" aria-selected="false">Autoresponder</button>
       <button type="button" class="tab-btn" data-tab="tab-weather" role="tab" aria-selected="false">Weather &amp; Alerts</button>
       <button type="button" class="tab-btn" data-tab="tab-net" role="tab" aria-selected="false">Radio Net</button>
-      <button type="button" class="tab-btn" data-tab="tab-meshwars" role="tab" aria-selected="false">MeshWars</button>
     </nav>
 
     <!-- Toast Notification Banner -->
@@ -63,7 +78,7 @@
         <article class="card">
           <div class="card-header">
             <h2>Active Bot Modules</h2>
-            <span class="pill" id="ov-active-count">0 / 4 Active</span>
+            <span class="pill" id="ov-active-count">0 / 3 Enabled</span>
           </div>
           <div class="module-summary-list" id="ov-module-cards"></div>
         </article>
@@ -200,7 +215,7 @@
                 <input type="text" id="cfg-core-tz" placeholder="America/Chicago" required />
                 <button type="button" class="btn btn-secondary" id="btn-detect-tz">Use Browser TZ</button>
               </div>
-              <span class="hint">Used for Radio Net and MeshWars weekly schedules.</span>
+              <span class="hint">Used for Radio Net and Weather daily forecast schedules.</span>
             </div>
 
             <div class="form-row-2">
@@ -283,7 +298,7 @@
               <span class="hint">Channels are automatically provisioned on the Virtual Companion when enabled.</span>
             </div>
             <div class="form-group">
-              <label for="cfg-ar-keywords">Trigger Keywords (comma-separated)</label>
+              <label for="cfg-ar-keywords">Trigger Keywords (comma-separated, case-insensitive)</label>
               <input type="text" id="cfg-ar-keywords" placeholder="test, ping, ack" required />
               <span class="hint">Case-insensitive substring match. Use <code>*</code> to reply to all messages on the channel.</span>
             </div>
@@ -319,9 +334,9 @@
           <div class="card-header">
             <div>
               <h2>US NWS Weather &amp; Severe Alerts</h2>
-              <p class="card-sub">Daily forecasts, severe weather watch/warning broadcasts, and OTA ZIP queries</p>
+              <p class="card-sub">Responds to any 5-digit ZIP code sent in <code>#weather</code> (no other text needed), plus daily forecasts &amp; NWS alerts</p>
             </div>
-            <span class="pill" id="wx-loc-pill">Location</span>
+            <span class="pill" id="wx-loc-pill">Fort Worth, TX</span>
           </div>
 
           <div class="btn-row mb-12">
@@ -340,8 +355,8 @@
             <div class="form-row-3">
               <div class="form-group">
                 <label for="cfg-wx-zip">Default US ZIP Code</label>
-                <input type="text" id="cfg-wx-zip" pattern="\d{5}|" placeholder="20001" />
-                <span class="hint">If set, overrides Lat/Lon</span>
+                <input type="text" id="cfg-wx-zip" pattern="\d{5}|" placeholder="76131" />
+                <span class="hint">Default: 76131 (Fort Worth, TX)</span>
               </div>
               <div class="form-group">
                 <label for="cfg-wx-lat">Fallback Latitude</label>
@@ -355,8 +370,9 @@
 
             <div class="form-row-2">
               <div class="form-group">
-                <label for="cfg-wx-wchan">Forecast Channel</label>
+                <label for="cfg-wx-wchan">Forecast &amp; ZIP Query Channel</label>
                 <input type="text" id="cfg-wx-wchan" placeholder="#weather" required />
+                <span class="hint">Send any 5-digit ZIP code in this channel for a 3-day forecast.</span>
               </div>
               <div class="form-group">
                 <label for="cfg-wx-achan">Severe Alerts Channel</label>
@@ -466,7 +482,7 @@
           <div class="card-header">
             <div>
               <h2>Live Radio Net Console (<code>net_bot</code>)</h2>
-              <p class="card-sub">Real-time check-in roster &amp; manual session controls</p>
+              <p class="card-sub">Tracks all channel participants on <code>#net</code> and ACKs explicit check-in keywords</p>
             </div>
             <span class="pill" id="net-status-pill">SCHEDULED</span>
           </div>
@@ -499,7 +515,7 @@
         <!-- Radio Net Configuration -->
         <article class="card">
           <div class="card-header">
-            <h2>Radio Net Schedule &amp; Messages</h2>
+            <h2>Radio Net Schedule &amp; Broadcasts</h2>
           </div>
           <form id="form-net">
             <div class="form-group">
@@ -515,8 +531,8 @@
                 <input type="text" id="cfg-net-channel" placeholder="#net" required />
               </div>
               <div class="form-group">
-                <label for="cfg-net-keyword">Check-In Keyword</label>
-                <input type="text" id="cfg-net-keyword" placeholder="#checkin" required />
+                <label for="cfg-net-keyword">Explicit ACK Keyword</label>
+                <input type="text" id="cfg-net-keyword" placeholder="!checkin" required />
               </div>
             </div>
 
@@ -546,13 +562,37 @@
             <div class="form-group">
               <label class="inline-check">
                 <input type="checkbox" id="cfg-net-reminders" />
-                <span>Send 1:00 PM &amp; 30-minute pre-net reminder announcements</span>
+                <span>Send 1:00 PM &amp; 30-minute pre-net reminders</span>
+              </label>
+              <label class="inline-check mt-6">
+                <input type="checkbox" id="cfg-net-hourly" />
+                <span>Broadcast hourly bonus reminder during active net</span>
+              </label>
+              <label class="inline-check mt-6">
+                <input type="checkbox" id="cfg-net-midupdates" />
+                <span>Broadcast halfway &amp; final-hour participant count updates</span>
               </label>
             </div>
 
             <div class="form-group">
-              <label for="cfg-net-open-msg">Opening Broadcast Message</label>
+              <label for="cfg-net-open-msg">Opening Message</label>
               <input type="text" id="cfg-net-open-msg" required />
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-net-hourly-msg">Hourly Bonus Message</label>
+              <input type="text" id="cfg-net-hourly-msg" required />
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="cfg-net-halfway-msg">Halfway Update Message</label>
+                <input type="text" id="cfg-net-halfway-msg" required />
+              </div>
+              <div class="form-group">
+                <label for="cfg-net-finalhr-msg">Final-Hour Update Message</label>
+                <input type="text" id="cfg-net-finalhr-msg" required />
+              </div>
             </div>
 
             <div class="form-group">
@@ -566,136 +606,19 @@
               <input type="text" id="cfg-net-close-msg" required />
             </div>
 
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary">Save Radio Net Settings</button>
-            </div>
-          </form>
-        </article>
-      </div>
-    </section>
-
-    <!-- ================= TAB 6: MESHWARS ================= -->
-    <section id="tab-meshwars" class="tab-panel" role="tabpanel">
-      <div class="grid-2">
-        <!-- Live MeshWars Console -->
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <h2>Live MeshWars Console (<code>meshwars_bot</code>)</h2>
-              <p class="card-sub">Tracks all channel participants during MeshWars and ACKs explicit check-in keywords</p>
-            </div>
-            <span class="pill" id="mw-status-pill">SCHEDULED</span>
-          </div>
-
-          <div class="btn-row mb-12">
-            <button type="button" class="btn btn-primary btn-sm" id="btn-mw-start">Start MeshWars Now</button>
-            <button type="button" class="btn btn-danger btn-sm" id="btn-mw-stop">End MeshWars &amp; Summarize</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-mw-announce">Send Announcement</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-mw-clear">Clear Roster</button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-mw-export">Export CSV</button>
-          </div>
-
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Warrior / Node Name</th>
-                  <th>Time</th>
-                  <th>SNR / Hops</th>
-                </tr>
-              </thead>
-              <tbody id="mw-roster-tbody">
-                <tr><td colspan="4" class="empty-cell">No warriors checked in for current session.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-        <!-- MeshWars Configuration -->
-        <article class="card">
-          <div class="card-header">
-            <h2>MeshWars Schedule &amp; Broadcasts</h2>
-          </div>
-          <form id="form-meshwars">
-            <div class="form-group">
-              <label class="inline-check">
-                <input type="checkbox" id="cfg-mw-enabled" />
-                <strong>Enable Scheduled Weekly MeshWars Net</strong>
-              </label>
-            </div>
-
             <div class="form-row-2">
               <div class="form-group">
-                <label for="cfg-mw-channel">MeshWars Channel</label>
-                <input type="text" id="cfg-mw-channel" placeholder="#meshwars" required />
+                <label for="cfg-net-rem1pm-msg">1:00 PM Reminder Message</label>
+                <input type="text" id="cfg-net-rem1pm-msg" required />
               </div>
               <div class="form-group">
-                <label for="cfg-mw-keyword">Explicit ACK Keyword</label>
-                <input type="text" id="cfg-mw-keyword" placeholder="!checkin" required />
+                <label for="cfg-net-rem30m-msg">30-Min Reminder Message</label>
+                <input type="text" id="cfg-net-rem30m-msg" required />
               </div>
-            </div>
-
-            <div class="form-row-3">
-              <div class="form-group">
-                <label for="cfg-mw-day">Day of Week</label>
-                <select id="cfg-mw-day">
-                  <option value="Sunday">Sunday</option>
-                  <option value="Monday">Monday</option>
-                  <option value="Tuesday">Tuesday</option>
-                  <option value="Wednesday">Wednesday</option>
-                  <option value="Thursday">Thursday</option>
-                  <option value="Friday">Friday</option>
-                  <option value="Saturday">Saturday</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="cfg-mw-time">Start Time (HH:MM)</label>
-                <input type="time" id="cfg-mw-time" required />
-              </div>
-              <div class="form-group">
-                <label for="cfg-mw-duration">Duration (Hours)</label>
-                <input type="number" id="cfg-mw-duration" min="0.5" max="24" step="0.5" required />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="inline-check">
-                <input type="checkbox" id="cfg-mw-reminders" />
-                <span>Send 1:00 PM &amp; 30-minute pre-net reminders</span>
-              </label>
-              <label class="inline-check mt-6">
-                <input type="checkbox" id="cfg-mw-hourly" />
-                <span>Broadcast hourly bonus reminder during active net</span>
-              </label>
-              <label class="inline-check mt-6">
-                <input type="checkbox" id="cfg-mw-midupdates" />
-                <span>Broadcast halfway &amp; final-hour participant count updates</span>
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label for="cfg-mw-open-msg">Opening Message</label>
-              <input type="text" id="cfg-mw-open-msg" required />
-            </div>
-
-            <div class="form-group">
-              <label for="cfg-mw-hourly-msg">Hourly Bonus Message</label>
-              <input type="text" id="cfg-mw-hourly-msg" required />
-            </div>
-
-            <div class="form-group">
-              <label for="cfg-mw-ack-msg">Check-In ACK Template</label>
-              <input type="text" id="cfg-mw-ack-msg" required />
-            </div>
-
-            <div class="form-group">
-              <label for="cfg-mw-close-msg">Closing Message</label>
-              <input type="text" id="cfg-mw-close-msg" required />
             </div>
 
             <div class="form-actions">
-              <button type="submit" class="btn btn-primary">Save MeshWars Settings</button>
+              <button type="submit" class="btn btn-primary">Save Radio Net Settings</button>
             </div>
           </form>
         </article>

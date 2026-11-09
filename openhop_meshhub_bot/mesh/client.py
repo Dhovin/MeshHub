@@ -380,6 +380,7 @@ class MeshCompanionClient:
                 channel_val = payload.get("chan_name") or payload.get("chan_nb") or 0
 
             sender = payload.get("sender") or payload.get("from")
+            fallback_sender: str | None = None
             if (not sender or sender == "unknown") and self.mc:
                 logged = None
                 reader = getattr(self.mc, "_reader", None)
@@ -397,37 +398,44 @@ class MeshCompanionClient:
                     if transport_code:
                         contact = self.mc.get_contact_by_key_prefix(transport_code)
                         if contact:
-                            sender = (
-                                contact.get("adv_name")
-                                or contact.get("name")
-                                or f"Unknown-{str(contact.get('public_key', ''))[:6]}"
-                            )
-                        if not sender or sender == "unknown":
-                            sender = f"Unknown-{str(transport_code)[:6]}"
+                            c_name = contact.get("adv_name") or contact.get("name")
+                            if c_name:
+                                sender = str(c_name)
+                            else:
+                                fallback_sender = (
+                                    f"Unknown-{str(contact.get('public_key', transport_code))[:6]}"
+                                )
+                        else:
+                            fallback_sender = f"Unknown-{str(transport_code)[:6]}"
 
-            if not sender or sender == "unknown":
-                match = re.match(r"^([^:\[\]]+):\s+(.*)$", text_val)
-                if match:
-                    guessed = match.group(1).strip()
-                    if guessed.lower() not in IGNORED_SENDER_PREFIXES:
-                        sender = guessed
-                        text_val = match.group(2)
-                    else:
-                        sender = "unknown"
-                else:
-                    sender = "unknown"
-            else:
-                pattern1 = rf"^{re.escape(str(sender))}:\s+(.*)$"
-                match1 = re.match(pattern1, text_val, re.IGNORECASE)
+            # MeshCore channel messages commonly embed "<SenderName>: <body text>" in payload["text"]
+            stripped = False
+            if sender and sender != "unknown":
+                pattern1 = rf"^{re.escape(str(sender))}:\s*(.*)$"
+                match1 = re.match(pattern1, text_val, re.IGNORECASE | re.DOTALL)
                 if match1:
                     text_val = match1.group(1)
+                    stripped = True
                 else:
                     first_word = str(sender).split()[0] if str(sender).strip() else ""
                     if first_word and len(first_word) >= 3:
-                        pattern2 = rf"^{re.escape(first_word)}:\s+(.*)$"
-                        match2 = re.match(pattern2, text_val, re.IGNORECASE)
+                        pattern2 = rf"^{re.escape(first_word)}:\s*(.*)$"
+                        match2 = re.match(pattern2, text_val, re.IGNORECASE | re.DOTALL)
                         if match2:
                             text_val = match2.group(1)
+                            stripped = True
+
+            if not stripped:
+                match = re.match(r"^([^:\[\]\r\n]{1,40}):\s+(.*)$", text_val, re.DOTALL)
+                if match:
+                    guessed = match.group(1).strip()
+                    if guessed and guessed.lower() not in IGNORED_SENDER_PREFIXES:
+                        if not sender or sender == "unknown" or str(sender).startswith("Unknown-"):
+                            sender = guessed
+                        text_val = match.group(2)
+
+            if not sender or sender == "unknown":
+                sender = fallback_sender or "unknown"
 
             path_len = payload.get("path_len")
             msg = {

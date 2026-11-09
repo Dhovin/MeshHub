@@ -3,7 +3,7 @@
   "id": "openhop.meshhub-bot",
   "name": "MeshHub Bot",
   "version": "2.0.1",
-  "description": "MeshCore companion bot for openHop Repeater with Autoresponder, US NWS Weather & Alerts, Radio Nets, and MeshWars.",
+  "description": "MeshCore companion bot for openHop Repeater with Autoresponder, US NWS Weather & Alerts, and Radio Net.",
   "runtime": {
     "type": "python",
     "entrypoint": "meshhub-bot"
@@ -41,15 +41,15 @@
         },
         "weather_bot": {
           "enabled": true,
-          "zipCode": "20001",
-          "latitude": 38.9072,
-          "longitude": -77.0369,
+          "zipCode": "76131",
+          "latitude": 32.8998,
+          "longitude": -97.3473,
           "weatherChannel": "#weather",
           "alertsChannel": "#weather",
           "weatherAlarm": "0 7 * * *",
           "nws_alerts": true,
           "alertPollSeconds": 300,
-          "userAgent": "openHopMeshHubBot/2.0.0 (https://github.com/Dhovin/meshhub-bot-openhop)",
+          "userAgent": "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)",
           "ignore_severities": [
             "Minor",
             "Unknown"
@@ -60,25 +60,8 @@
           "forecastTemplate": ""
         },
         "net_bot": {
-          "enabled": false,
-          "channel": "#net",
-          "day_of_week": "Tuesday",
-          "time": "19:00",
-          "duration": 2.0,
-          "keyword": "#checkin",
-          "enable_reminders": true,
-          "enable_hourly_message": false,
-          "enable_mid_net_updates": false,
-          "opening_message": "Weekly Net is now OPEN! Send {keyword} to check in.",
-          "closing_message": "Weekly Net is now CLOSED. Total check-ins: {count}. Thank you for participating!",
-          "checkin_ack_template": "Welcome {sender}, {count} {user_str} {have_str} checked in.",
-          "reminder_1pm_message": "Reminder: Weekly Net tonight at {time} on {channel}! Send {keyword} to check in.",
-          "reminder_30m_message": "Weekly Net starts in 30 minutes on {channel}! Send {keyword} when the net opens.",
-          "state_file": "net_state.json"
-        },
-        "meshwars_bot": {
           "enabled": true,
-          "channel": "#meshwars",
+          "channel": "#net",
           "day_of_week": "Saturday",
           "time": "18:00",
           "duration": 6.0,
@@ -94,7 +77,7 @@
           "checkin_ack_template": "Welcome {sender}, {count} {user_str} {have_str} checked in.",
           "reminder_1pm_message": "Reminder: MeshWars Net starts today at {time} on {channel}!",
           "reminder_30m_message": "MeshWars Net starts in 30 minutes on {channel}! Get your nodes ready.",
-          "state_file": "meshwars_state.json"
+          "state_file": "net_state.json"
         }
       }
     }

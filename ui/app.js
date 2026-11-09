@@ -11,10 +11,23 @@ let nativeSelfInfo = null;
 let nativeChannels = [];
 let nativeContacts = [];
 let formsPopulated = false;
+let authRequired = false;
 
 // ------------------------------------------------------------------
 // Auth & HTTP Helpers
 // ------------------------------------------------------------------
+
+function saveJwtToken(token) {
+  const clean = String(token || "").trim().replace(/^["']|["']$/g, "");
+  if (!clean) return;
+  try {
+    window.localStorage.setItem("pymc_jwt_token", clean);
+    window.localStorage.setItem("meshhub.bot.token", clean);
+  } catch (_) {}
+  try {
+    window.sessionStorage.setItem("pymc_jwt_token", clean);
+  } catch (_) {}
+}
 
 function getJwtToken() {
   try {
@@ -22,7 +35,7 @@ function getJwtToken() {
     const queryToken = urlParams.get("token");
     if (queryToken && queryToken.trim()) {
       const clean = queryToken.trim();
-      window.localStorage.setItem("pymc_jwt_token", clean);
+      saveJwtToken(clean);
       return clean;
     }
   } catch (_) {
@@ -31,6 +44,8 @@ function getJwtToken() {
 
   const keys = [
     "pymc_jwt_token",
+    "meshhub.bot.token",
+    "waev.companion.token",
     "token",
     "auth_token",
     "openhop_token",
@@ -50,8 +65,18 @@ function getJwtToken() {
     }
   } catch (_) {}
   try {
+    if (window.parent && window.parent !== window && window.parent.sessionStorage) {
+      storages.push(window.parent.sessionStorage);
+    }
+  } catch (_) {}
+  try {
     if (window.opener && window.opener.localStorage) {
       storages.push(window.opener.localStorage);
+    }
+  } catch (_) {}
+  try {
+    if (window.opener && window.opener.sessionStorage) {
+      storages.push(window.opener.sessionStorage);
     }
   } catch (_) {}
 
@@ -66,6 +91,24 @@ function getJwtToken() {
     }
   }
   return "";
+}
+
+function setAuthBannerVisible(visible, errorMsg = "") {
+  authRequired = Boolean(visible);
+  const card = document.getElementById("auth-card");
+  const errEl = document.getElementById("auth-error-msg");
+  if (card) {
+    card.classList.toggle("hidden", !visible);
+  }
+  if (errEl) {
+    if (errorMsg) {
+      errEl.textContent = errorMsg;
+      errEl.classList.remove("hidden");
+    } else {
+      errEl.textContent = "";
+      errEl.classList.add("hidden");
+    }
+  }
 }
 
 function getAuthHeaders() {
@@ -87,9 +130,14 @@ async function apiGet(url) {
     credentials: "same-origin",
     cache: "no-store",
   });
+  if (res.status === 401) {
+    setAuthBannerVisible(true);
+    throw new Error(`HTTP 401 (Sign-in required)`);
+  }
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} on ${url}`);
   }
+  setAuthBannerVisible(false);
   return await res.json();
 }
 
@@ -101,10 +149,44 @@ async function apiPost(url, bodyObj) {
     body: JSON.stringify(bodyObj),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    setAuthBannerVisible(true, "Session authentication required. Please sign in above.");
+    throw new Error(`HTTP 401 (Sign-in required)`);
+  }
   if (!res.ok || data.success === false) {
     throw new Error(data.error || data.message || `HTTP ${res.status}`);
   }
+  setAuthBannerVisible(false);
   return data;
+}
+
+async function handleInlineLogin(username, password) {
+  const btn = document.getElementById("btn-auth-submit");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.token) {
+      throw new Error(data.error || data.message || `Login failed (HTTP ${res.status})`);
+    }
+    saveJwtToken(data.token);
+    setAuthBannerVisible(false);
+    showToast(`Signed in as ${data.username || username}! Loading bot telemetry...`, false);
+    formsPopulated = false;
+    await refreshAllTelemetry();
+  } catch (err) {
+    setAuthBannerVisible(true, err.message || "Invalid credentials");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function utf8ByteLength(str) {
@@ -172,7 +254,9 @@ function showToast(msg, isError = false) {
 async function fetchPluginSettingsFresh() {
   const resp = await apiGet(`/api/plugins/settings?id=${encodeURIComponent(PLUGIN_ID)}`);
   const payload = resp.data || resp;
-  const cfg = payload.config || payload.saved || payload.defaults || {};
+  const cfg = Object.assign({}, payload.config || payload.saved || payload.defaults || {});
+  delete cfg._runtime;
+  delete cfg._cmd;
   currentConfig = cfg;
   return cfg;
 }
@@ -183,6 +267,9 @@ async function savePluginConfigPatch(patchObj, successMsg = "Settings saved & ho
     const merged = deepMerge(fresh, patchObj);
     delete merged._runtime;
     delete merged._cmd;
+    if (merged.modules && merged.modules.meshwars_bot) {
+      delete merged.modules.meshwars_bot;
+    }
     merged.schema_version = 2;
 
     await apiPost("/api/plugins/settings", {
@@ -247,29 +334,20 @@ async function sendBotCommand(type, params = {}) {
 async function fetchRuntimeSnapshot() {
   try {
     const resp = await apiGet(`/api/plugins/runtime?id=${encodeURIComponent(PLUGIN_ID)}`);
-    const outer = resp.data || resp;
-    const rt = outer.runtime || outer;
-    if (rt && Object.keys(rt).length > 0) {
+    const outer = (resp && resp.data) ? resp.data : resp;
+    const rt = (outer && outer.runtime && typeof outer.runtime === "object") ? outer.runtime : outer;
+    if (rt && typeof rt === "object" && (rt.modules || rt.companion !== undefined || rt.connected !== undefined)) {
       currentRuntime = rt;
       return rt;
     }
   } catch (_) {
-    // Fall back to settings _runtime mirror
-  }
-
-  try {
-    const cfg = await fetchPluginSettingsFresh();
-    if (cfg && cfg._runtime) {
-      currentRuntime = cfg._runtime;
-      return currentRuntime;
-    }
-  } catch (_) {
-    // Ignore
+    // Handled by apiGet (401 sets auth banner)
   }
   return currentRuntime;
 }
 
 async function fetchNativeCompanionData() {
+  if (authRequired) return;
   try {
     const listResp = await apiGet("/api/companion/");
     const items = listResp.data || [];
@@ -318,11 +396,13 @@ async function fetchNativeCompanionData() {
 }
 
 async function refreshAllTelemetry() {
-  if (!currentConfig) {
+  await fetchRuntimeSnapshot();
+  if (!currentConfig && !authRequired) {
     await fetchPluginSettingsFresh().catch(() => null);
   }
-  await fetchRuntimeSnapshot();
-  await fetchNativeCompanionData();
+  if (!authRequired) {
+    await fetchNativeCompanionData();
+  }
   if (!formsPopulated && currentConfig) {
     populateFormsFromConfig(currentConfig);
     formsPopulated = true;
@@ -341,7 +421,6 @@ function renderAll() {
   renderAutoresponderStats();
   renderWeatherStatus();
   renderNetConsole("net_bot", "net-status-pill", "net-roster-tbody");
-  renderNetConsole("meshwars_bot", "mw-status-pill", "mw-roster-tbody");
 }
 
 function renderTopStatus() {
@@ -349,6 +428,13 @@ function renderTopStatus() {
   const text = document.getElementById("conn-text");
   const verEl = document.getElementById("plugin-version");
   if (!badge || !text) return;
+
+  if (authRequired) {
+    badge.classList.remove("connected");
+    badge.classList.add("disconnected");
+    text.textContent = "Sign-In Required";
+    return;
+  }
 
   const isConn = Boolean(currentRuntime && currentRuntime.connected);
   badge.classList.toggle("connected", isConn);
@@ -404,10 +490,11 @@ function renderOverviewTab() {
   document.getElementById("ov-timezone").textContent =
     (currentRuntime && currentRuntime.timezone) ||
     (currentConfig && currentConfig.core && currentConfig.core.timezone) ||
-    "UTC";
+    "America/Chicago";
 
-  // Module Summary Cards
-  const mods = (currentRuntime && currentRuntime.modules) || {};
+  // Module Summary Cards (3 consolidated modules)
+  const rtMods = (currentRuntime && currentRuntime.modules) || {};
+  const cfgMods = (currentConfig && currentConfig.modules) || {};
   const modContainer = document.getElementById("ov-module-cards");
   if (modContainer) {
     clearElement(modContainer);
@@ -417,7 +504,7 @@ function renderOverviewTab() {
         label: "Autoresponder",
         sub: (m) =>
           m.enabled
-            ? `Channels: ${(m.channels || []).join(", ")} | Matches: ${m.match_count || 0}`
+            ? `Channels: ${(m.channels || ["#test"]).join(", ")} | Matches: ${m.match_count || 0}`
             : "Disabled",
       },
       {
@@ -425,34 +512,24 @@ function renderOverviewTab() {
         label: "Weather & NWS Alerts",
         sub: (m) =>
           m.enabled
-            ? `${m.location || m.zipCode || "Configured"} | Channel: ${m.weatherChannel || "#weather"} | Subs: ${m.subscriber_count || 0}`
+            ? `${m.location || m.zipCode || "76131"} | Channel: ${m.weatherChannel || "#weather"} | Subs: ${m.subscriber_count || 0}`
             : "Disabled",
       },
       {
         key: "net_bot",
-        label: "Weekly Radio Net",
+        label: "Radio Net",
         sub: (m) =>
           m.is_active
-            ? `ACTIVE NOW on ${m.channel} (${m.participant_count || 0} check-ins)`
+            ? `ACTIVE NOW on ${m.channel || "#net"} (${m.participant_count || 0} check-ins)`
             : m.enabled
-            ? `${m.day_of_week} ${m.time} on ${m.channel}`
-            : "Disabled (Manual Start Available)",
-      },
-      {
-        key: "meshwars_bot",
-        label: "MeshWars Net",
-        sub: (m) =>
-          m.is_active
-            ? `ACTIVE NOW on ${m.channel} (${m.participant_count || 0} warriors)`
-            : m.enabled
-            ? `${m.day_of_week} ${m.time} on ${m.channel}`
+            ? `${m.day_of_week || "Saturday"} ${m.time || "18:00"} (${m.duration || 6}h) on ${m.channel || "#net"}`
             : "Disabled (Manual Start Available)",
       },
     ];
 
     let enabledCount = 0;
     for (const d of defs) {
-      const m = mods[d.key] || {};
+      const m = Object.assign({}, cfgMods[d.key] || {}, rtMods[d.key] || {});
       if (m.enabled) enabledCount++;
       const row = document.createElement("div");
       row.className = "mod-row";
@@ -478,7 +555,7 @@ function renderOverviewTab() {
 
     const activeCountEl = document.getElementById("ov-active-count");
     if (activeCountEl) {
-      activeCountEl.textContent = `${enabledCount} / 4 Enabled`;
+      activeCountEl.textContent = `${enabledCount} / 3 Enabled`;
     }
   }
 
@@ -632,9 +709,6 @@ function renderCompanionTab() {
   if (mods.net_bot && (mods.net_bot.enabled || mods.net_bot.is_active)) {
     addUsage(mods.net_bot.channel, "Radio Net");
   }
-  if (mods.meshwars_bot && (mods.meshwars_bot.enabled || mods.meshwars_bot.is_active)) {
-    addUsage(mods.meshwars_bot.channel, "MeshWars");
-  }
 
   if (channels.length === 0) {
     const tr = document.createElement("tr");
@@ -691,7 +765,7 @@ function renderWeatherStatus() {
 
   const locPill = document.getElementById("wx-loc-pill");
   if (locPill) {
-    locPill.textContent = wx.location || wx.zipCode || "Unconfigured";
+    locPill.textContent = wx.location || wx.zipCode || "Fort Worth, TX (76131)";
   }
 
   // Subscribers Table
@@ -788,7 +862,7 @@ function renderNetConsole(moduleKey, pillId, tbodyId) {
     pill.textContent = isAct
       ? `ACTIVE (${m.participant_count || 0} Checked In)`
       : m.enabled
-      ? `SCHEDULED (${m.day_of_week || ""} ${m.time || ""})`
+      ? `SCHEDULED (${m.day_of_week || "Saturday"} ${m.time || "18:00"})`
       : "STANDBY";
   }
 
@@ -803,7 +877,7 @@ function renderNetConsole(moduleKey, pillId, tbodyId) {
     td.colSpan = 4;
     td.className = "empty-cell";
     td.textContent = m.is_active
-      ? `Net is open on ${m.channel || "channel"} — waiting for check-ins (${m.keyword || ""})...`
+      ? `Net is open on ${m.channel || "#net"} — waiting for check-ins (${m.keyword || "!checkin"})...`
       : "No check-ins in current session.";
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -850,7 +924,7 @@ function populateFormsFromConfig(cfg) {
   document.getElementById("cfg-conn-host").value = conn.host || "127.0.0.1";
   document.getElementById("cfg-conn-port").value = conn.tcpPort || 5051;
   document.getElementById("cfg-core-tz").value =
-    core.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    core.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
   document.getElementById("cfg-core-ratelimit").value =
     core.perUserRateLimitSeconds !== undefined ? core.perUserRateLimitSeconds : 30;
   document.getElementById("cfg-core-txlimit").value =
@@ -859,7 +933,7 @@ function populateFormsFromConfig(cfg) {
 
   // Autoresponder
   const ar = mods.autoresponce || {};
-  document.getElementById("cfg-ar-enabled").checked = Boolean(ar.enabled);
+  document.getElementById("cfg-ar-enabled").checked = ar.enabled !== false;
   document.getElementById("cfg-ar-channels").value = Array.isArray(ar.channels)
     ? ar.channels.join(", ")
     : ar.channels || "#test";
@@ -872,14 +946,14 @@ function populateFormsFromConfig(cfg) {
   document.getElementById("cfg-ar-template").value = arTpl;
   updateByteCounter("cfg-ar-template", "ar-tpl-bytes");
 
-  // Weather
+  // Weather (Default: Fort Worth, TX 76131)
   const wx = mods.weather_bot || {};
-  document.getElementById("cfg-wx-enabled").checked = Boolean(wx.enabled);
-  document.getElementById("cfg-wx-zip").value = wx.zipCode || "";
+  document.getElementById("cfg-wx-enabled").checked = wx.enabled !== false;
+  document.getElementById("cfg-wx-zip").value = wx.zipCode || "76131";
   document.getElementById("cfg-wx-lat").value =
-    wx.latitude !== undefined ? wx.latitude : 38.9072;
+    wx.latitude !== undefined ? wx.latitude : 32.8998;
   document.getElementById("cfg-wx-lon").value =
-    wx.longitude !== undefined ? wx.longitude : -77.0369;
+    wx.longitude !== undefined ? wx.longitude : -97.3473;
   document.getElementById("cfg-wx-wchan").value =
     wx.weatherChannel || wx.channel || "#weather";
   document.getElementById("cfg-wx-achan").value =
@@ -899,45 +973,43 @@ function populateFormsFromConfig(cfg) {
   document.getElementById("cfg-wx-clear-tpl").value =
     wx.clearTemplate || "🟢 CLEAR: {event} has ended for {region}.";
 
-  // Radio Net
-  const net = mods.net_bot || {};
-  document.getElementById("cfg-net-enabled").checked = Boolean(net.enabled);
-  document.getElementById("cfg-net-channel").value = net.channel || "#net";
-  document.getElementById("cfg-net-keyword").value = net.keyword || "#checkin";
-  document.getElementById("cfg-net-day").value = net.day_of_week || "Tuesday";
-  document.getElementById("cfg-net-time").value = net.time || "19:00";
-  document.getElementById("cfg-net-duration").value = net.duration || 2;
+  // Radio Net (net_bot consolidated with MeshWars settings on #net)
+  const net = Object.assign({}, mods.meshwars_bot || {}, mods.net_bot || {});
+  document.getElementById("cfg-net-enabled").checked = net.enabled !== false;
+  document.getElementById("cfg-net-channel").value =
+    net.channel && net.channel !== "#meshwars" ? net.channel : "#net";
+  document.getElementById("cfg-net-keyword").value =
+    net.checkin_keyword || net.keyword || "!checkin";
+  document.getElementById("cfg-net-day").value = net.day_of_week || "Saturday";
+  document.getElementById("cfg-net-time").value = net.time || "18:00";
+  document.getElementById("cfg-net-duration").value =
+    net.duration !== undefined ? net.duration : 6.0;
   document.getElementById("cfg-net-reminders").checked = net.enable_reminders !== false;
+  document.getElementById("cfg-net-hourly").checked = net.enable_hourly_message !== false;
+  document.getElementById("cfg-net-midupdates").checked = net.enable_mid_net_updates !== false;
   document.getElementById("cfg-net-open-msg").value =
-    net.opening_message || "Weekly Net is now OPEN! Send {keyword} to check in.";
+    net.opening_message ||
+    "Welcome to the MeshWars net! Send !checkin or any chat message to participate.";
+  document.getElementById("cfg-net-hourly-msg").value =
+    net.hourly_message ||
+    "Register on https://meshwars.com and any message sent in this chat counts toward your bonus points.";
+  document.getElementById("cfg-net-halfway-msg").value =
+    net.halfway_message ||
+    "MeshWars Net Update: Halfway through tonight's net! {count} {user_str} checked in so far.";
+  document.getElementById("cfg-net-finalhr-msg").value =
+    net.final_hour_message ||
+    "MeshWars Net Update: 1 hour remaining in tonight's net! {count} {user_str} checked in so far.";
   document.getElementById("cfg-net-ack-msg").value =
     net.checkin_ack_template || "Welcome {sender}, {count} {user_str} {have_str} checked in.";
   document.getElementById("cfg-net-close-msg").value =
     net.closing_message ||
-    "Weekly Net is now CLOSED. Total check-ins: {count}. Thank you for participating!";
-
-  // MeshWars
-  const mw = mods.meshwars_bot || {};
-  document.getElementById("cfg-mw-enabled").checked = Boolean(mw.enabled);
-  document.getElementById("cfg-mw-channel").value = mw.channel || "#meshwars";
-  document.getElementById("cfg-mw-keyword").value = mw.checkin_keyword || "!checkin";
-  document.getElementById("cfg-mw-day").value = mw.day_of_week || "Saturday";
-  document.getElementById("cfg-mw-time").value = mw.time || "18:00";
-  document.getElementById("cfg-mw-duration").value = mw.duration || 6;
-  document.getElementById("cfg-mw-reminders").checked = mw.enable_reminders !== false;
-  document.getElementById("cfg-mw-hourly").checked = mw.enable_hourly_message !== false;
-  document.getElementById("cfg-mw-midupdates").checked = mw.enable_mid_net_updates !== false;
-  document.getElementById("cfg-mw-open-msg").value =
-    mw.opening_message ||
-    "Welcome to the MeshWars net! Send !checkin or any chat message to participate.";
-  document.getElementById("cfg-mw-hourly-msg").value =
-    mw.hourly_message ||
-    "Register on https://meshwars.com and any message sent in this chat counts toward your bonus points.";
-  document.getElementById("cfg-mw-ack-msg").value =
-    mw.checkin_ack_template || "Welcome {sender}, {count} {user_str} {have_str} checked in.";
-  document.getElementById("cfg-mw-close-msg").value =
-    mw.closing_message ||
     "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today.";
+  document.getElementById("cfg-net-rem1pm-msg").value =
+    net.reminder_1pm_message ||
+    "Reminder: MeshWars Net starts today at {time} on {channel}!";
+  document.getElementById("cfg-net-rem30m-msg").value =
+    net.reminder_30m_message ||
+    "MeshWars Net starts in 30 minutes on {channel}! Get your nodes ready.";
 }
 
 function exportRosterCsv(moduleKey, filename) {
@@ -983,6 +1055,19 @@ function updateByteCounter(inputId, counterId) {
 // ------------------------------------------------------------------
 
 function setupEventListeners() {
+  // Inline Auth Login Form
+  const authForm = document.getElementById("form-auth-login");
+  if (authForm) {
+    authForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const user = document.getElementById("auth-username").value.trim();
+      const pass = document.getElementById("auth-password").value;
+      if (user && pass) {
+        handleInlineLogin(user, pass);
+      }
+    });
+  }
+
   // Tabs
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1090,7 +1175,7 @@ function setupEventListeners() {
 
   // Browser Timezone Auto-Detect
   document.getElementById("btn-detect-tz").addEventListener("click", () => {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago";
     document.getElementById("cfg-core-tz").value = tz;
     showToast(`Detected browser timezone: ${tz}`, false);
   });
@@ -1104,7 +1189,7 @@ function setupEventListeners() {
         tcpPort: Number(document.getElementById("cfg-conn-port").value || 5051),
       },
       core: {
-        timezone: document.getElementById("cfg-core-tz").value.trim() || "UTC",
+        timezone: document.getElementById("cfg-core-tz").value.trim() || "America/Chicago",
         perUserRateLimitSeconds: Number(
           document.getElementById("cfg-core-ratelimit").value || 30
         ),
@@ -1182,9 +1267,9 @@ function setupEventListeners() {
       modules: {
         weather_bot: {
           enabled: document.getElementById("cfg-wx-enabled").checked,
-          zipCode: document.getElementById("cfg-wx-zip").value.trim(),
-          latitude: Number(document.getElementById("cfg-wx-lat").value || 38.9072),
-          longitude: Number(document.getElementById("cfg-wx-lon").value || -77.0369),
+          zipCode: document.getElementById("cfg-wx-zip").value.trim() || "76131",
+          latitude: Number(document.getElementById("cfg-wx-lat").value || 32.8998),
+          longitude: Number(document.getElementById("cfg-wx-lon").value || -97.3473),
           weatherChannel: wChan,
           alertsChannel: aChan,
           channel: wChan,
@@ -1200,7 +1285,7 @@ function setupEventListeners() {
     });
   });
 
-  // Radio Net action buttons & form
+  // Radio Net action buttons & form (consolidated net_bot)
   document.getElementById("btn-net-start").addEventListener("click", () => {
     sendBotCommand("net_start", { module: "net_bot" });
   });
@@ -1219,59 +1304,28 @@ function setupEventListeners() {
 
   document.getElementById("form-net").addEventListener("submit", (e) => {
     e.preventDefault();
+    const kw = document.getElementById("cfg-net-keyword").value.trim() || "!checkin";
     savePluginConfigPatch({
       modules: {
         net_bot: {
           enabled: document.getElementById("cfg-net-enabled").checked,
           channel: document.getElementById("cfg-net-channel").value.trim() || "#net",
-          keyword: document.getElementById("cfg-net-keyword").value.trim() || "#checkin",
+          checkin_keyword: kw,
+          keyword: kw,
           day_of_week: document.getElementById("cfg-net-day").value,
-          time: document.getElementById("cfg-net-time").value || "19:00",
-          duration: Number(document.getElementById("cfg-net-duration").value || 2),
+          time: document.getElementById("cfg-net-time").value || "18:00",
+          duration: Number(document.getElementById("cfg-net-duration").value || 6),
           enable_reminders: document.getElementById("cfg-net-reminders").checked,
+          enable_hourly_message: document.getElementById("cfg-net-hourly").checked,
+          enable_mid_net_updates: document.getElementById("cfg-net-midupdates").checked,
           opening_message: document.getElementById("cfg-net-open-msg").value.trim(),
+          hourly_message: document.getElementById("cfg-net-hourly-msg").value.trim(),
+          halfway_message: document.getElementById("cfg-net-halfway-msg").value.trim(),
+          final_hour_message: document.getElementById("cfg-net-finalhr-msg").value.trim(),
           checkin_ack_template: document.getElementById("cfg-net-ack-msg").value.trim(),
           closing_message: document.getElementById("cfg-net-close-msg").value.trim(),
-        },
-      },
-    });
-  });
-
-  // MeshWars action buttons & form
-  document.getElementById("btn-mw-start").addEventListener("click", () => {
-    sendBotCommand("net_start", { module: "meshwars_bot" });
-  });
-  document.getElementById("btn-mw-stop").addEventListener("click", () => {
-    sendBotCommand("net_stop", { module: "meshwars_bot" });
-  });
-  document.getElementById("btn-mw-announce").addEventListener("click", () => {
-    sendBotCommand("net_announce", { module: "meshwars_bot" });
-  });
-  document.getElementById("btn-mw-clear").addEventListener("click", () => {
-    sendBotCommand("net_clear", { module: "meshwars_bot" });
-  });
-  document.getElementById("btn-mw-export").addEventListener("click", () => {
-    exportRosterCsv("meshwars_bot", "meshwars_roster.csv");
-  });
-
-  document.getElementById("form-meshwars").addEventListener("submit", (e) => {
-    e.preventDefault();
-    savePluginConfigPatch({
-      modules: {
-        meshwars_bot: {
-          enabled: document.getElementById("cfg-mw-enabled").checked,
-          channel: document.getElementById("cfg-mw-channel").value.trim() || "#meshwars",
-          checkin_keyword: document.getElementById("cfg-mw-keyword").value.trim() || "!checkin",
-          day_of_week: document.getElementById("cfg-mw-day").value,
-          time: document.getElementById("cfg-mw-time").value || "18:00",
-          duration: Number(document.getElementById("cfg-mw-duration").value || 6),
-          enable_reminders: document.getElementById("cfg-mw-reminders").checked,
-          enable_hourly_message: document.getElementById("cfg-mw-hourly").checked,
-          enable_mid_net_updates: document.getElementById("cfg-mw-midupdates").checked,
-          opening_message: document.getElementById("cfg-mw-open-msg").value.trim(),
-          hourly_message: document.getElementById("cfg-mw-hourly-msg").value.trim(),
-          checkin_ack_template: document.getElementById("cfg-mw-ack-msg").value.trim(),
-          closing_message: document.getElementById("cfg-mw-close-msg").value.trim(),
+          reminder_1pm_message: document.getElementById("cfg-net-rem1pm-msg").value.trim(),
+          reminder_30m_message: document.getElementById("cfg-net-rem30m-msg").value.trim(),
         },
       },
     });

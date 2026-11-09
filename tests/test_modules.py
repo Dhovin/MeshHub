@@ -1,8 +1,6 @@
 """Unit tests for Autoresponder, WeatherBot, and NetSessionEngine modules."""
 
-import os
 import tempfile
-import time
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
@@ -12,7 +10,7 @@ from openhop_meshhub_bot.hub import BotHub
 
 
 class TestModules(unittest.IsolatedAsyncioTestCase):
-    async def test_autoresponder_keywords_and_hops(self):
+    async def test_autoresponder_case_insensitive_keywords_and_hops(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             hub = BotHub(data_dir=tmpdir)
             sent = []
@@ -27,26 +25,33 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                 {
                     "enabled": True,
                     "channels": ["#test"],
-                    "keywords": ["ping", "test"],
+                    "keywords": ["PiNg", "TeSt", "AcK"],
                     "maxHops": 4,
                     "responseTemplate": "@[{sender}] ACK ({hops_label})",
                 }
             )
 
-            # Matching keyword and hops <= 4
+            # Uppercase keyword match and hops <= 4
             await ar.on_message(
-                {"sender": "Alice", "text": "ping check", "channel": "#test", "hops": 2}
+                {"sender": "Alice", "text": "PING CHECK", "channel": "#test", "hops": 2}
             )
             self.assertEqual(len(sent), 1)
             self.assertEqual(sent[0][2], "@[Alice] ACK (2 hops)")
+
+            # Mixed case keyword match
+            await ar.on_message(
+                {"sender": "Charlie", "text": "aCk please", "channel": "#test", "hops": 0}
+            )
+            self.assertEqual(len(sent), 2)
+            self.assertEqual(sent[1][2], "@[Charlie] ACK (Direct (0 hops))")
 
             # Exceeding maxHops -> ignored
             await ar.on_message(
                 {"sender": "Bob", "text": "ping check", "channel": "#test", "hops": 6}
             )
-            self.assertEqual(len(sent), 1)
+            self.assertEqual(len(sent), 2)
 
-    async def test_net_engine_checkin_and_resume_on_restart(self):
+    async def test_weather_bot_bare_zipcode_in_channel_and_default_location(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             hub = BotHub(data_dir=tmpdir)
             sent = []
@@ -56,33 +61,82 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                 return {"ok": True}
 
             hub.tx_queue._send_fn = capture_send
+            wx = hub.modules["weather_bot"]
+            self.assertEqual(wx.zip_code, "76131")
+            self.assertAlmostEqual(wx.latitude, 32.8998, places=4)
+            self.assertAlmostEqual(wx.longitude, -97.3473, places=4)
+
+            with patch.object(
+                wx,
+                "fetch_forecast_text",
+                new=AsyncMock(return_value="Wx 76131:\nToday: ☀️ H:82 L:61"),
+            ):
+                # 1. Bare 5-digit ZIP code in #weather with no other text
+                await wx.on_message(
+                    {"sender": "Alice", "text": "76131", "channel": "#weather", "hops": 1}
+                )
+                self.assertEqual(len(sent), 1)
+                self.assertIn("Wx 76131", sent[0][2])
+
+                # 2. Bare 5-digit ZIP code preceded by MeshCore sender prefix
+                await wx.on_message(
+                    {
+                        "sender": "Unknown-1a2b3c",
+                        "text": "Kae39 📡: 76131",
+                        "channel": "#weather",
+                        "hops": 1,
+                    }
+                )
+                self.assertEqual(len(sent), 2)
+                self.assertIn("Wx 76131", sent[1][2])
+
+    async def test_net_bot_consolidated_meshwars_behavior_on_net_channel(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hub = BotHub(data_dir=tmpdir)
+            self.assertNotIn("meshwars_bot", hub.modules)
+            self.assertIn("net_bot", hub.modules)
+            sent = []
+
+            async def capture_send(target_type, target, text):
+                sent.append((target_type, target, text))
+                return {"ok": True}
+
+            hub.tx_queue._send_fn = capture_send
             net = hub.modules["net_bot"]
-            net.apply_config(
-                {
-                    "enabled": True,
-                    "channel": "#net",
-                    "day_of_week": "Tuesday",
-                    "time": "19:00",
-                    "duration": 2.0,
-                    "keyword": "#checkin",
-                }
-            )
+            self.assertEqual(net.channel, "#net")
+            self.assertEqual(net.day_of_week, "Saturday")
+            self.assertEqual(net.time, "18:00")
+            self.assertEqual(net.duration, 6.0)
+            self.assertEqual(net.keyword, "!checkin")
 
             await net.start_net_manual()
             self.assertTrue(net.is_active)
 
-            # Check in two users
+            # 1. Explicit !CHECKIN (case-insensitive) gets recorded + ACKed
             await net.on_message(
-                {"sender": "KI5ABC", "text": "Hello #checkin", "channel": "#net", "hops": 1, "snr": 9.0}
+                {
+                    "sender": "KI5ABC",
+                    "text": "Hello !CHECKIN",
+                    "channel": "#net",
+                    "hops": 1,
+                    "snr": 9.0,
+                }
             )
+            # 2. Regular chat message on #net also counts as participation (from meshwars_bot)
             await net.on_message(
-                {"sender": "W5XYZ", "text": "#checkin 73", "channel": "#net", "hops": 3, "snr": 4.5}
+                {
+                    "sender": "W5XYZ",
+                    "text": "Good evening everyone on the net!",
+                    "channel": "#net",
+                    "hops": 3,
+                    "snr": 4.5,
+                }
             )
             self.assertEqual(len(net.participants), 2)
             self.assertEqual(net.checkins, ["KI5ABC", "W5XYZ"])
             await net.stop()
 
-            # Simulate restart while net is still within its 2-hour window
+            # Simulate restart while net is still within its 6-hour window
             hub2 = BotHub(data_dir=tmpdir)
             net2 = hub2.modules["net_bot"]
             await net2.start()
@@ -112,7 +166,7 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                             "event": "Tornado Warning",
                             "severity": "Extreme",
                             "certainty": "Observed",
-                            "areaDesc": "Travis County, TX",
+                            "areaDesc": "Tarrant County, TX",
                             "onset": datetime.now(ZoneInfo("UTC")).isoformat(),
                             "expires": future_iso,
                             "headline": "Take shelter now",

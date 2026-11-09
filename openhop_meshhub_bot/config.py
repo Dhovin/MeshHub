@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -38,15 +39,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "weather_bot": {
             "enabled": True,
-            "zipCode": "20001",
-            "latitude": 38.9072,
-            "longitude": -77.0369,
+            "zipCode": "76131",
+            "latitude": 32.8998,
+            "longitude": -97.3473,
             "weatherChannel": "#weather",
             "alertsChannel": "#weather",
             "weatherAlarm": "0 7 * * *",
             "nws_alerts": True,
             "alertPollSeconds": 300,
-            "userAgent": "openHopMeshHubBot/2.0.0 (https://github.com/Dhovin/meshhub-bot-openhop)",
+            "userAgent": "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)",
             "ignore_severities": ["Minor", "Unknown"],
             "ignore_events": [],
             "alertTemplate": "⚠️ {event} ({severity}) for {region} until {end}: {headline}",
@@ -54,25 +55,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "forecastTemplate": "",
         },
         "net_bot": {
-            "enabled": False,
-            "channel": "#net",
-            "day_of_week": "Tuesday",
-            "time": "19:00",
-            "duration": 2.0,
-            "keyword": "#checkin",
-            "enable_reminders": True,
-            "enable_hourly_message": False,
-            "enable_mid_net_updates": False,
-            "opening_message": "Weekly Net is now OPEN! Send {keyword} to check in.",
-            "closing_message": "Weekly Net is now CLOSED. Total check-ins: {count}. Thank you for participating!",
-            "checkin_ack_template": "Welcome {sender}, {count} {user_str} {have_str} checked in.",
-            "reminder_1pm_message": "Reminder: Weekly Net tonight at {time} on {channel}! Send {keyword} to check in.",
-            "reminder_30m_message": "Weekly Net starts in 30 minutes on {channel}! Send {keyword} when the net opens.",
-            "state_file": "net_state.json",
-        },
-        "meshwars_bot": {
             "enabled": True,
-            "channel": "#meshwars",
+            "channel": "#net",
             "day_of_week": "Saturday",
             "time": "18:00",
             "duration": 6.0,
@@ -88,7 +72,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "checkin_ack_template": "Welcome {sender}, {count} {user_str} {have_str} checked in.",
             "reminder_1pm_message": "Reminder: MeshWars Net starts today at {time} on {channel}!",
             "reminder_30m_message": "MeshWars Net starts in 30 minutes on {channel}! Get your nodes ready.",
-            "state_file": "meshwars_state.json",
+            "state_file": "net_state.json",
         },
     },
 }
@@ -159,7 +143,7 @@ def _normalize_alarm_to_cron(val: Any) -> str:
 
 
 def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Migrate a v1.x config dictionary to schema v2 and merge over DEFAULT_CONFIG.
+    """Migrate a v1.x or legacy v2 config dictionary to schema v2 and merge over DEFAULT_CONFIG.
 
     Returns (migrated_config, was_migrated_from_v1).
     """
@@ -168,6 +152,7 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
 
     raw_version = raw.get("schema_version", 1)
     was_v1 = raw_version < SCHEMA_VERSION
+    migrated_any = was_v1
 
     working = copy.deepcopy(raw)
     modules_in = working.get("modules")
@@ -175,10 +160,9 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         modules_in = {}
         working["modules"] = modules_in
 
-    # --- Weather v1 -> v2 migration ---
+    # --- Weather migration (including 20001 -> 76131 Fort Worth default upgrade) ---
     wx_in = modules_in.get("weather_bot")
     if isinstance(wx_in, dict):
-        # Migrate legacy 'channel' or 'channels' dict/list -> weatherChannel & alertsChannel
         legacy_ch = wx_in.get("channel")
         legacy_chs = wx_in.get("channels")
         if isinstance(legacy_chs, dict):
@@ -197,13 +181,11 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             if "alertsChannel" not in wx_in:
                 wx_in["alertsChannel"] = legacy_ch
 
-        # Migrate legacy 'cron' or 'HH:MM' weatherAlarm -> 5-field cron weatherAlarm
         if "cron" in wx_in and "weatherAlarm" not in wx_in:
             wx_in["weatherAlarm"] = _normalize_alarm_to_cron(wx_in.get("cron"))
         elif "weatherAlarm" in wx_in:
             wx_in["weatherAlarm"] = _normalize_alarm_to_cron(wx_in.get("weatherAlarm"))
 
-        # Migrate legacy myPosition -> latitude / longitude
         my_pos = wx_in.get("myPosition")
         if isinstance(my_pos, dict):
             if "latitude" not in wx_in and "lat" in my_pos:
@@ -211,10 +193,43 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             if "longitude" not in wx_in and "lon" in my_pos:
                 wx_in["longitude"] = my_pos["lon"]
 
-        # If v1 config had custom latitude/longitude (e.g. Austin 30.2672, -97.7431)
-        # and no explicit zipCode in the file, set zipCode="" so the user's coordinates win
-        if was_v1 and "zipCode" not in wx_in and ("latitude" in wx_in or "longitude" in wx_in):
+        # Upgrade old Washington DC 20001 default to Fort Worth TX 76131
+        if str(wx_in.get("zipCode", "")).strip() == "20001":
+            wx_in["zipCode"] = "76131"
+            wx_in["latitude"] = 32.8998
+            wx_in["longitude"] = -97.3473
+            migrated_any = True
+        elif was_v1 and "zipCode" not in wx_in and ("latitude" in wx_in or "longitude" in wx_in):
             wx_in["zipCode"] = ""
+
+    # --- Consolidate meshwars_bot -> net_bot on '#net' ---
+    mw_in = modules_in.pop("meshwars_bot", None)
+    net_in = modules_in.get("net_bot")
+    if isinstance(mw_in, dict):
+        migrated_any = True
+        # If net_bot was missing or had the old disabled Tuesday/#checkin placeholder, replace with meshwars_bot
+        is_legacy_net = not isinstance(net_in, dict) or (
+            net_in.get("day_of_week") == "Tuesday"
+            and net_in.get("time") == "19:00"
+            and not net_in.get("enabled", False)
+        )
+        if is_legacy_net:
+            migrated_net = copy.deepcopy(DEFAULT_CONFIG["modules"]["net_bot"])
+            migrated_net.update(mw_in)
+            if str(migrated_net.get("channel", "")).strip().lower() in ("", "#meshwars", "meshwars"):
+                migrated_net["channel"] = "#net"
+            migrated_net["state_file"] = "net_state.json"
+            modules_in["net_bot"] = migrated_net
+    elif isinstance(net_in, dict):
+        # Also upgrade standalone legacy Tuesday disabled net_bot placeholder to the new MeshWars-based net_bot
+        if (
+            net_in.get("day_of_week") == "Tuesday"
+            and net_in.get("time") == "19:00"
+            and not net_in.get("enabled", False)
+            and net_in.get("keyword") == "#checkin"
+        ):
+            modules_in["net_bot"] = copy.deepcopy(DEFAULT_CONFIG["modules"]["net_bot"])
+            migrated_any = True
 
     # --- Autoresponder migration ---
     ar_in = modules_in.get("autoresponce")
@@ -224,6 +239,7 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
 
     merged = deep_merge(DEFAULT_CONFIG, working)
     merged["schema_version"] = SCHEMA_VERSION
+    merged["modules"].pop("meshwars_bot", None)
 
     # Validate & normalize core fields
     core = merged.setdefault("core", {})
@@ -253,7 +269,7 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     wx_merged = merged["modules"]["weather_bot"]
     wx_merged["weatherAlarm"] = _normalize_alarm_to_cron(wx_merged.get("weatherAlarm"))
 
-    return merged, was_v1
+    return merged, migrated_any
 
 
 def redact_config(cfg: dict[str, Any], *, keep_runtime: bool = False) -> dict[str, Any]:
@@ -282,14 +298,35 @@ def canonical_config_hash(cfg: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def atomic_write_config_file(config_path: str, data: dict[str, Any]) -> None:
+    """Atomically write clean config dictionary to disk."""
+    parent = os.path.dirname(os.path.abspath(config_path))
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".config.", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+            fh.write("\n")
+            fh.flush()
+        os.replace(tmp_path, config_path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
 def load_config_file(config_path: str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Load, migrate, and validate config from disk.
 
     Returns (migrated_config_without_volatile, raw_disk_dict).
-    Creates a one-time .v1.bak backup if migrating a v1 file on disk.
+    Creates a one-time .v1.bak backup if migrating a v1 file on disk, and
+    strips any legacy _runtime bloat from config.json on disk.
     """
     raw: dict[str, Any] = {}
-    if config_path and os.path.isfile(config_path):
+    file_exists = bool(config_path and os.path.isfile(config_path))
+    if file_exists:
         try:
             with open(config_path, "r", encoding="utf-8") as fh:
                 loaded = json.load(fh)
@@ -299,7 +336,7 @@ def load_config_file(config_path: str) -> tuple[dict[str, Any], dict[str, Any]]:
             logger.error("Failed to read config from %s: %s; using defaults", config_path, exc)
 
     migrated, was_v1 = migrate_config(raw)
-    if was_v1 and config_path and os.path.isfile(config_path):
+    if was_v1 and file_exists:
         bak_path = f"{config_path}.v1.bak"
         if not os.path.exists(bak_path):
             try:
@@ -309,4 +346,20 @@ def load_config_file(config_path: str) -> tuple[dict[str, Any], dict[str, Any]]:
                 logger.warning("Could not write v1 config backup %s: %s", bak_path, exc)
 
     clean = redact_config(migrated, keep_runtime=False)
+
+    # If the file on disk had _runtime bloat or legacy keys (and no pending _cmd),
+    # rewrite config.json cleanly so runtime data is never stored in config.json.
+    if file_exists and "_cmd" not in raw:
+        has_legacy_bloat = (
+            "_runtime" in raw
+            or was_v1
+            or "meshwars_bot" in (raw.get("modules") or {})
+        )
+        if has_legacy_bloat:
+            try:
+                atomic_write_config_file(config_path, clean)
+                logger.info("Cleaned legacy keys/_runtime from %s", config_path)
+            except Exception as exc:
+                logger.warning("Could not rewrite cleaned config %s: %s", config_path, exc)
+
     return clean, raw

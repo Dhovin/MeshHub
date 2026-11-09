@@ -147,16 +147,16 @@ class WeatherBotModule(BaseModule):
     """NWS Severe Alerts, Scheduled Daily Forecast, OTA ZIP lookup, and DM Subscriptions."""
 
     def __init__(self, hub: Any, config: dict[str, Any]):
-        self.zip_code: str = "20001"
-        self.latitude: float = 38.9072
-        self.longitude: float = -77.0369
+        self.zip_code: str = "76131"
+        self.latitude: float = 32.8998
+        self.longitude: float = -97.3473
         self.weather_channel: str = "#weather"
         self.alerts_channel: str = "#weather"
         self.weather_alarm: str = "0 7 * * *"
         self.nws_alerts_enabled: bool = True
         self.alert_poll_seconds: int = 300
         self.user_agent: str = (
-            "openHopMeshHubBot/2.0.0 (https://github.com/Dhovin/meshhub-bot-openhop)"
+            "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)"
         )
         self.ignore_severities: list[str] = ["Minor", "Unknown"]
         self.ignore_events: list[str] = []
@@ -166,7 +166,7 @@ class WeatherBotModule(BaseModule):
         self.clear_template: str = "🟢 CLEAR: {event} has ended for {region}."
         self.forecast_template: str = ""
 
-        self.location_name: str = ""
+        self.location_name: str = "Fort Worth, TX"
         self.nws_timezone: str = ""
         self.cached_forecast_url: str | None = None
         self.last_forecast_ts: int | None = None
@@ -176,13 +176,21 @@ class WeatherBotModule(BaseModule):
         self._alert_task: asyncio.Task | None = None
         self._running: bool = False
 
+        self._seen_alerts: dict[str, dict[str, Any]] = {}
+        self._zip_cache: dict[str, dict[str, Any]] = {
+            "76131": {
+                "lat": 32.8998,
+                "lon": -97.3473,
+                "displayName": "Fort Worth, TX",
+            }
+        }
         super().__init__("weather_bot", hub, config)
-        self._seen_alerts: dict[str, dict[str, Any]] = self._load_json_file(
-            self._seen_alerts_path(), {}
-        )
-        self._zip_cache: dict[str, dict[str, Any]] = self._load_json_file(
-            self._cache_path(), {}
-        )
+        loaded_seen = self._load_json_file(self._seen_alerts_path(), {})
+        if isinstance(loaded_seen, dict):
+            self._seen_alerts = loaded_seen
+        loaded_cache = self._load_json_file(self._cache_path(), {})
+        if isinstance(loaded_cache, dict):
+            self._zip_cache.update(loaded_cache)
 
     def _subscriptions_path(self) -> str:
         return os.path.join(self.hub.get_data_dir(), "weather_subscriptions.json")
@@ -222,13 +230,15 @@ class WeatherBotModule(BaseModule):
         prev_enabled = getattr(self, "enabled", False)
 
         super().apply_config(config)
-        self.zip_code = str(self.config.get("zipCode", "") or "").strip()
+        self.zip_code = str(self.config.get("zipCode", "76131") or "76131").strip()
         try:
-            self.latitude = float(self.config.get("latitude", 38.9072))
-            self.longitude = float(self.config.get("longitude", -77.0369))
+            self.latitude = float(self.config.get("latitude", 32.8998))
+            self.longitude = float(self.config.get("longitude", -97.3473))
         except (ValueError, TypeError):
-            self.latitude = 38.9072
-            self.longitude = -77.0369
+            self.latitude = 32.8998
+            self.longitude = -97.3473
+        if self.zip_code == "76131" and not self.location_name:
+            self.location_name = "Fort Worth, TX"
 
         self.weather_channel = str(
             self.config.get("weatherChannel")
@@ -725,9 +735,10 @@ class WeatherBotModule(BaseModule):
         channel = msg.get("channel")
         is_dm = channel is None
 
-        # Strip optional @[BotName] mention or "Sender: " prefix
+        # Strip optional @[BotName] mention or any "<SenderName>: " prefix
         clean_text = re.sub(r"^@\[[^\]]+\]\s*", "", raw_text).strip()
-        clean_text = re.sub(r"^[A-Za-z0-9_.-]+:\s+", "", clean_text).strip()
+        clean_text = re.sub(r"^[^:\[\]\r\n]{1,40}:\s*", "", clean_text).strip()
+        clean_text = re.sub(r"^@\[[^\]]+\]\s*", "", clean_text).strip()
         lower = clean_text.lower()
 
         if is_dm:
@@ -873,4 +884,4 @@ class WeatherBotModule(BaseModule):
     def get_help_segment(self) -> str:
         if not self.enabled:
             return ""
-        return f"wx <ZIP>({self.weather_channel})"
+        return f"<ZIP>({self.weather_channel})"

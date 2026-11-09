@@ -36,13 +36,13 @@ DAY_OF_WEEK_MAP = {
 
 def compute_net_crons(day_of_week_str: str, time_str: str) -> tuple[str, str, str]:
     """Return (net_start_cron, reminder_1pm_cron, reminder_30m_cron)."""
-    dow = DAY_OF_WEEK_MAP.get(str(day_of_week_str or "Tuesday").strip().lower(), 2)
-    parts = str(time_str or "19:00").strip().split(":")
+    dow = DAY_OF_WEEK_MAP.get(str(day_of_week_str or "Saturday").strip().lower(), 6)
+    parts = str(time_str or "18:00").strip().split(":")
     try:
         hour = max(0, min(23, int(parts[0])))
         minute = max(0, min(59, int(parts[1]) if len(parts) > 1 else 0))
     except (ValueError, TypeError):
-        hour, minute = 19, 0
+        hour, minute = 18, 0
 
     net_cron = f"{minute} {hour} * * {dow}"
     r1pm_cron = f"0 13 * * {dow}"
@@ -60,7 +60,7 @@ def compute_net_crons(day_of_week_str: str, time_str: str) -> tuple[str, str, st
 
 
 class NetSessionEngine(BaseModule):
-    """Unified scheduled & on-demand Net manager for net_bot and meshwars_bot."""
+    """Scheduled & on-demand Radio Net manager (net_bot)."""
 
     def __init__(
         self,
@@ -68,12 +68,12 @@ class NetSessionEngine(BaseModule):
         hub: Any,
         config: dict[str, Any],
         *,
-        track_all_chat: bool = False,
+        track_all_chat: bool = True,
         default_channel: str = "#net",
-        default_day: str = "Tuesday",
-        default_time: str = "19:00",
-        default_duration: float = 2.0,
-        default_keyword: str = "#checkin",
+        default_day: str = "Saturday",
+        default_time: str = "18:00",
+        default_duration: float = 6.0,
+        default_keyword: str = "!checkin",
         default_state_file: str = "net_state.json",
     ):
         self.track_all_chat = track_all_chat
@@ -161,19 +161,11 @@ class NetSessionEngine(BaseModule):
 
         self.opening_message = str(
             self.config.get("opening_message")
-            or (
-                "Welcome to the MeshWars net! Send !checkin or any chat message to participate."
-                if self.track_all_chat
-                else "Weekly Net is now OPEN! Send {keyword} to check in."
-            )
+            or "Welcome to the MeshWars net! Send !checkin or any chat message to participate."
         )
         self.closing_message = str(
             self.config.get("closing_message")
-            or (
-                "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today."
-                if self.track_all_chat
-                else "Weekly Net is now CLOSED. Total check-ins: {count}. Thank you for participating!"
-            )
+            or "The MeshWars net has concluded. Thank you for participating! {count} {user_str} checked in today."
         )
         self.hourly_message = str(
             self.config.get("hourly_message")
@@ -181,11 +173,11 @@ class NetSessionEngine(BaseModule):
         )
         self.halfway_message = str(
             self.config.get("halfway_message")
-            or "Net Update: Halfway through tonight's net! {count} {user_str} checked in so far."
+            or "MeshWars Net Update: Halfway through tonight's net! {count} {user_str} checked in so far."
         )
         self.final_hour_message = str(
             self.config.get("final_hour_message")
-            or "Net Update: 1 hour remaining in tonight's net! {count} {user_str} checked in so far."
+            or "MeshWars Net Update: 1 hour remaining in tonight's net! {count} {user_str} checked in so far."
         )
         self.checkin_ack_template = str(
             self.config.get("checkin_ack_template")
@@ -193,11 +185,11 @@ class NetSessionEngine(BaseModule):
         )
         self.reminder_1pm_message = str(
             self.config.get("reminder_1pm_message")
-            or f"Reminder: Net starts today at {{time}} on {{channel}}! Send {{keyword}} to check in."
+            or "Reminder: MeshWars Net starts today at {time} on {channel}!"
         )
         self.reminder_30m_message = str(
             self.config.get("reminder_30m_message")
-            or f"Net starts in 30 minutes on {{channel}}! Send {{keyword}} when the net opens."
+            or "MeshWars Net starts in 30 minutes on {channel}! Get your nodes ready."
         )
 
         if getattr(self, "_running", False):
@@ -224,7 +216,11 @@ class NetSessionEngine(BaseModule):
     def _load_state(self) -> None:
         path = self._state_file_path()
         if not os.path.isfile(path):
-            return
+            legacy_mw = os.path.join(self.hub.get_data_dir(), "meshwars_state.json")
+            if os.path.isfile(legacy_mw):
+                path = legacy_mw
+            else:
+                return
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -626,7 +622,7 @@ class NetSessionEngine(BaseModule):
         if not text:
             return
 
-        has_keyword = bool(self.keyword and self.keyword.lower() in text.lower())
+        has_keyword = bool(self.keyword and self.keyword.casefold() in text.casefold())
         if not has_keyword and not self.track_all_chat:
             return
 

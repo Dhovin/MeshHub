@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from meshcore.events import EventType
 from openhop_meshhub_bot.mesh.client import MeshCompanionClient
-from openhop_meshhub_bot.mesh.text import clamp_lora_message
-from openhop_meshhub_bot.mesh.txqueue import PRIORITY_ALERT, PRIORITY_BROADCAST, PRIORITY_REPLY, OutboundTxQueue
+from openhop_meshhub_bot.mesh.txqueue import PRIORITY_BROADCAST, OutboundTxQueue
 
 
 class FakeEvent:
@@ -49,12 +48,12 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
         client.mc.commands.get_channel = AsyncMock(side_effect=fake_get_channel)
         client.mc.commands.set_channel = AsyncMock(side_effect=fake_set_channel)
 
-        mapped = await client.provision_channels(["#test", "#weather", "#meshwars"])
+        mapped = await client.provision_channels(["#test", "#weather", "#net"])
         # #test already existed at slot 2 -> kept at slot 2!
         self.assertEqual(mapped["#test"], 2)
-        # #weather and #meshwars added to first empty slots (3 and 4)
+        # #weather and #net added to first empty slots (3 and 4)
         self.assertEqual(mapped["#weather"], 3)
-        self.assertEqual(mapped["#meshwars"], 4)
+        self.assertEqual(mapped["#net"], 4)
         # Slot 1 (#custom-user-chan) and Slot 0 (Public) were never touched!
         self.assertEqual(len(set_calls), 2)
         self.assertEqual(set_calls[0][0], 3)
@@ -77,15 +76,25 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
                         "sender_timestamp": 1700000000,
                         "message": "Kae39: Test message",
                         "transport_code": "aabbccddeeff",
-                    }
+                    },
+                    {
+                        "sender_timestamp": 1700000001,
+                        "message": "UnknownContactNode: 76131",
+                        "transport_code": "112233445566",
+                    },
                 ]
             )
         )
-        client.mc.get_contact_by_key_prefix = MagicMock(
-            return_value={"adv_name": "Kae39", "public_key": "aabbccddeeff0011"}
-        )
 
-        ev = FakeEvent(
+        def fake_contact_lookup(code):
+            if code == "aabbccddeeff":
+                return {"adv_name": "Kae39", "public_key": "aabbccddeeff0011"}
+            return None
+
+        client.mc.get_contact_by_key_prefix = MagicMock(side_effect=fake_contact_lookup)
+
+        # Case 1: Contact found in contacts table
+        ev1 = FakeEvent(
             EventType.CHANNEL_MSG_RECV,
             {
                 "channel_idx": 2,
@@ -95,11 +104,27 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
                 "snr": 8.5,
             },
         )
-        client._on_channel_message(ev)
+        client._on_channel_message(ev1)
         self.assertEqual(len(received), 1)
         self.assertEqual(received[0]["sender"], "Kae39")
         self.assertEqual(received[0]["text"], "Test message")
         self.assertEqual(received[0]["hops"], 5)
+
+        # Case 2: Contact NOT in contacts table yet (transport_code present) -> extracts sender name and strips prefix so bare ZIP "76131" is preserved!
+        ev2 = FakeEvent(
+            EventType.CHANNEL_MSG_RECV,
+            {
+                "channel_idx": 3,
+                "text": "UnknownContactNode: 76131",
+                "sender_timestamp": 1700000001,
+                "path_len": 1,
+                "snr": 10.0,
+            },
+        )
+        client._on_channel_message(ev2)
+        self.assertEqual(len(received), 2)
+        self.assertEqual(received[1]["sender"], "UnknownContactNode")
+        self.assertEqual(received[1]["text"], "76131")
 
     async def test_tx_queue_clamps_to_135_bytes_and_orders_priorities(self):
         dispatched = []

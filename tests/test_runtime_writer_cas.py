@@ -1,4 +1,4 @@
-"""Unit tests for RuntimeWriter CAS race protection and BotHub idempotent command mailbox."""
+"""Unit tests for RuntimeWriter (no config.json pollution) and BotHub idempotent command mailbox."""
 
 import json
 import os
@@ -9,33 +9,30 @@ from openhop_meshhub_bot.hub import BotHub
 
 
 class TestRuntimeWriterAndMailbox(unittest.IsolatedAsyncioTestCase):
-    async def test_cas_mirror_skips_when_unprocessed_cmd_present(self):
+    async def test_runtime_writer_writes_only_runtime_json_not_config_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_path = os.path.join(tmpdir, "config.json")
             with open(cfg_path, "w", encoding="utf-8") as fh:
                 json.dump({"schema_version": 2, "connection": {"tcpPort": 5051}}, fh)
 
             hub = BotHub(config_path=cfg_path, data_dir=tmpdir)
-            # Simulate openHop settings API writing a pending _cmd into config.json
-            with open(cfg_path, "w", encoding="utf-8") as fh:
-                json.dump(
-                    {
-                        "schema_version": 2,
-                        "connection": {"tcpPort": 5051},
-                        "_cmd": {"id": "cmd-pending-1", "type": "net_clear"},
-                    },
-                    fh,
-                )
+            ok = hub.runtime_writer.write_once(force_mirror=True)
+            self.assertTrue(ok)
 
-            # RuntimeWriter must NOT overwrite config.json while cmd-pending-1 is unprocessed
-            mirrored = hub.runtime_writer._cas_mirror_to_config(hub.get_runtime_payload())
-            self.assertFalse(mirrored)
+            # runtime.json must exist and have telemetry
+            rt_path = os.path.join(tmpdir, "runtime.json")
+            self.assertTrue(os.path.isfile(rt_path))
+            with open(rt_path, "r", encoding="utf-8") as fh:
+                rt_data = json.load(fh)
+            self.assertIn("modules", rt_data)
+            self.assertEqual(rt_data["version"], "2.0.1")
 
+            # config.json must NEVER have _runtime written into it
             with open(cfg_path, "r", encoding="utf-8") as fh:
                 disk_cfg = json.load(fh)
-            self.assertEqual(disk_cfg["_cmd"]["id"], "cmd-pending-1")
+            self.assertNotIn("_runtime", disk_cfg)
 
-    async def test_idempotent_command_mailbox_deduplicates_across_restart(self):
+    async def test_idempotent_command_mailbox_deduplicates_and_scrubs_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_path = os.path.join(tmpdir, "config.json")
             with open(cfg_path, "w", encoding="utf-8") as fh:
@@ -57,7 +54,25 @@ class TestRuntimeWriterAndMailbox(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(hub1._cmd_results), 1)
             self.assertTrue(hub1._cmd_results[0]["ok"])
 
-            # Simulate service restart with the same _cmd still in config.json
+            # _cmd should be scrubbed from config.json after processing
+            with open(cfg_path, "r", encoding="utf-8") as fh:
+                clean_disk = json.load(fh)
+            self.assertNotIn("_cmd", clean_disk)
+            self.assertNotIn("_runtime", clean_disk)
+
+            # Simulate service restart even if the same _cmd were re-sent
+            with open(cfg_path, "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "schema_version": 2,
+                        "_cmd": {
+                            "id": "cmd-unique-42",
+                            "type": "net_clear",
+                            "params": {"module": "net_bot"},
+                        },
+                    },
+                    fh,
+                )
             hub2 = BotHub(config_path=cfg_path, data_dir=tmpdir)
             self.assertTrue(hub2.is_cmd_processed("cmd-unique-42"))
             await hub2._check_disk_config_once()

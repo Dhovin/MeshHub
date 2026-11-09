@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from ..mesh.text import extract_template_fields, format_template
@@ -63,11 +64,13 @@ class AutoresponderModule(BaseModule):
         return list(self.channels)
 
     def _matches_keyword(self, text: str) -> bool:
-        lower = text.strip().lower()
+        clean = re.sub(r"^@\[[^\]]+\]\s*", "", str(text or "")).strip()
+        clean = re.sub(r"^[^:\[\]\r\n]{1,40}:\s+", "", clean).strip()
+        lower = clean.casefold()
         if not lower:
             return False
         for kw in self.keywords:
-            k = kw.strip().lower()
+            k = str(kw or "").strip().casefold()
             if not k:
                 continue
             if k == "*" or k in lower:

@@ -13,7 +13,9 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from . import __version__
 from .config import (
+    atomic_write_config_file,
     canonical_config_hash,
     load_config_file,
     migrate_config,
@@ -107,25 +109,13 @@ class BotHub:
                 "net_bot",
                 self,
                 mods_cfg.get("net_bot", {}),
-                track_all_chat=False,
-                default_channel="#net",
-                default_day="Tuesday",
-                default_time="19:00",
-                default_duration=2.0,
-                default_keyword="#checkin",
-                default_state_file="net_state.json",
-            ),
-            "meshwars_bot": NetSessionEngine(
-                "meshwars_bot",
-                self,
-                mods_cfg.get("meshwars_bot", {}),
                 track_all_chat=True,
-                default_channel="#meshwars",
+                default_channel="#net",
                 default_day="Saturday",
                 default_time="18:00",
                 default_duration=6.0,
                 default_keyword="!checkin",
-                default_state_file="meshwars_state.json",
+                default_state_file="net_state.json",
             ),
         }
 
@@ -353,8 +343,14 @@ class BotHub:
                 await self.execute_mailbox_command(cmd_obj)
 
         # 2. Check if settings (excluding _runtime and _cmd) changed
-        migrated, _ = migrate_config(raw)
+        migrated, migrated_changed = migrate_config(raw)
         clean = redact_config(migrated, keep_runtime=False)
+        if "_cmd" in raw or "_runtime" in raw or migrated_changed:
+            try:
+                atomic_write_config_file(self.config_path, clean)
+            except Exception as exc:
+                logger.debug("Could not scrub transient keys from %s: %s", self.config_path, exc)
+
         new_hash = canonical_config_hash(clean)
         if new_hash != self._last_config_hash:
             logger.info("Detected configuration change in %s; hot-reloading...", self.config_path)
@@ -428,7 +424,7 @@ class BotHub:
                 if mod_key not in ("net_bot", "meshwars_bot"):
                     res = {"error": f"Invalid net module: {mod_key}"}
                 else:
-                    net_mod: NetSessionEngine = self.modules[mod_key]  # type: ignore[assignment]
+                    net_mod: NetSessionEngine = self.modules["net_bot"]  # type: ignore[assignment]
                     if cmd_type == "net_start":
                         res = await net_mod.start_net_manual()
                     elif cmd_type == "net_stop":
@@ -556,7 +552,7 @@ class BotHub:
 
         return {
             "id": os.environ.get("OPENHOP_PLUGIN_ID", "openhop.meshhub-bot"),
-            "version": "2.0.0",
+            "version": __version__,
             "connected": self.mesh_client.is_connected,
             "connection_type": "tcp",
             "companion": {
