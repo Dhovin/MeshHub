@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openhop-meshhub-bot"
 version = "2.0.1"
-description = "MeshHub Bot plugin for openHop Repeater with Virtual Companion integration, Autoresponder, US NWS Weather & Alerts, Radio Nets, and MeshWars."
+description = "MeshHub Bot plugin for openHop Repeater with Virtual Companion integration, Autoresponder, US NWS Weather & Alerts, and Radio Net."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

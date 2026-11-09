@@ -1,7 +1,7 @@
 {
   "id": "openhop.meshhub-bot",
   "name": "MeshHub Bot",
-  "description": "Multi-function bot automation suite for openHop repeaters: !help, NWS weather alerts, radio net controller, MeshWars, and keyword auto-responder.",
+  "description": "MeshCore companion bot suite for openHop repeaters: !help dispatcher, NWS weather forecasts & severe alerts, radio net controller with MeshWars bonus tracking, and keyword auto-responder.",
   "repository": "Dhovin/meshhub-bot-openhop",
-  "version": "1.0.8"
+  "version": "2.0.1"
 }
