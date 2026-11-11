@@ -25,7 +25,7 @@ class TestRuntimeWriterAndMailbox(unittest.IsolatedAsyncioTestCase):
             with open(rt_path, "r", encoding="utf-8") as fh:
                 rt_data = json.load(fh)
             self.assertIn("modules", rt_data)
-            self.assertEqual(rt_data["version"], "2.0.1")
+            self.assertEqual(rt_data["version"], "2.0.2")
 
             # config.json must NEVER have _runtime written into it
             with open(cfg_path, "r", encoding="utf-8") as fh:

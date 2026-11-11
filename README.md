@@ -2,7 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![openHop Plugin](https://img.shields.io/badge/openHop-plugin--schema--v2-green.svg)](https://github.com/openhop-dev/openhop_repeater)
-[![Version: 2.0.1](https://img.shields.io/badge/version-2.0.1-blue.svg)](https://github.com/Dhovin/meshhub-bot-openhop/releases/tag/v2.0.1)
+[![Version: 2.0.2](https://img.shields.io/badge/version-2.0.2-blue.svg)](https://github.com/Dhovin/meshhub-bot-openhop/releases/tag/v2.0.2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **MeshHub Bot** (`openhop.meshhub-bot`) is an official MeshCore companion bot and community automation plugin for **[openHop Repeater](https://github.com/openhop-dev/openhop_repeater)** (the MeshCore LoRa radio infrastructure daemon).
@@ -93,7 +93,7 @@ MeshHub Bot follows a dual-runtime architecture aligned with openHop Repeater's 
 On your openHop Repeater host:
 
 ```bash
-openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/download/v2.0.1/openhop_meshhub_bot-2.0.1-py3-none-any.whl
+openhop-plugin-manager install https://github.com/Dhovin/meshhub-bot-openhop/releases/download/v2.0.2/openhop_meshhub_bot-2.0.2-py3-none-any.whl
 ```
 
 Or install directly from the git repository:
@@ -160,7 +160,7 @@ companions:
       "weatherAlarm": "0 7 * * *",
       "nws_alerts": true,
       "alertPollSeconds": 300,
-      "userAgent": "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)"
+      "userAgent": "openHopMeshHubBot/2.0.2 (https://github.com/Dhovin/meshhub-bot-openhop)"
     },
     "net_bot": {
       "enabled": true,
@@ -193,7 +193,7 @@ meshhub-bot-openhop/
 │   ├── app.js                    # Telemetry polling, hot-reloading & API client
 │   └── styles.css                # Dark theme UI stylesheet
 ├── openhop_meshhub_bot/          # Python daemon package
-│   ├── __init__.py               # Version definition (__version__ = "2.0.1")
+│   ├── __init__.py               # Version definition (__version__ = "2.0.2")
 │   ├── main.py                   # CLI entrypoint (meshhub-bot)
 │   ├── hub.py                    # Central BotHub, hot-reloading & command mailbox
 │   ├── config.py                 # Schema migration, validation & pure config I/O
@@ -236,7 +236,7 @@ python -m unittest discover -s tests -v
 ```bash
 python -m build --wheel
 ```
-The compiled wheel will be generated in `dist/openhop_meshhub_bot-2.0.1-py3-none-any.whl`.
+The compiled wheel will be generated in `dist/openhop_meshhub_bot-2.0.2-py3-none-any.whl`.
 
 ---
 

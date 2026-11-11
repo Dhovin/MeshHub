@@ -688,19 +688,63 @@ class MeshCompanionClient:
 
         results: dict[str, Any] = {}
 
-        # 1. Path Hash Byte Policy (1-byte: 0, 2-byte: 1, 3-byte: 2) via 0x3d\0
+        # 1. Path Hash Byte Policy (1-byte: 0, 2-byte: 1, 3-byte: 2)
+        # Multi-layer application:
+        #  a) Companion Binary Protocol: 0x3D\0 (MeshCore v1.14+ companion frame)
+        #  b) CLI Command: 'set path.hash.mode <mode>' (Repeaters & Nodes with CommonCLI)
+        #  c) Custom Variables: 'path.hash.mode:<mode>' and 'path_hash_mode:<mode>'
+        #  d) Verification: Query get_path_hash_mode() to verify live active mode
         path_hash = settings.get("pathHashMode")
-        if path_hash is not None and hasattr(self.mc.commands, "set_path_hash_mode"):
+        if path_hash is not None and self.mc:
             mode = max(0, min(2, int(path_hash)))
-            try:
-                async with self._cmd_lock:
-                    ev = await self.mc.commands.set_path_hash_mode(mode)
-                is_err = hasattr(ev, "type") and ev.type == EventType.ERROR
-                results["path_hash_mode"] = not is_err
-                logger.info("Configured companion path hash mode to %d-byte (mode=%d)", mode + 1, mode)
-            except Exception as exc:
-                logger.warning("Failed to set path hash mode: %s", exc)
-                results["path_hash_mode"] = False
+            path_mode_success = False
+
+            # a) Binary command 0x3D\0
+            if hasattr(self.mc.commands, "set_path_hash_mode"):
+                try:
+                    async with self._cmd_lock:
+                        ev = await self.mc.commands.set_path_hash_mode(mode)
+                    if not (hasattr(ev, "type") and ev.type == EventType.ERROR):
+                        path_mode_success = True
+                        logger.info("Configured companion path hash mode to %d-byte via 0x3D (mode=%d)", mode + 1, mode)
+                except Exception as exc:
+                    logger.debug("set_path_hash_mode 0x3D command error: %s", exc)
+
+            # b) CLI Command fallback/tandem (Repeaters & Nodes with CommonCLI)
+            if hasattr(self.mc.commands, "run_cli_command"):
+                try:
+                    async with self._cmd_lock:
+                        cli_ev = await self.mc.commands.run_cli_command(f"set path.hash.mode {mode}")
+                    if not (hasattr(cli_ev, "type") and cli_ev.type == EventType.ERROR):
+                        path_mode_success = True
+                        logger.info("Configured path.hash.mode to %d via CLI command", mode)
+                except Exception as exc:
+                    logger.debug("run_cli_command path.hash.mode error: %s", exc)
+
+            # c) Custom variables (nodes supporting custom vars)
+            if hasattr(self.mc.commands, "set_custom_var"):
+                try:
+                    async with self._cmd_lock:
+                        await self.mc.commands.set_custom_var("path.hash.mode", str(mode))
+                        await self.mc.commands.set_custom_var("path_hash_mode", str(mode))
+                except Exception as exc:
+                    logger.debug("set_custom_var error: %s", exc)
+
+            # d) Live verification query
+            active_mode = None
+            if hasattr(self.mc.commands, "get_path_hash_mode"):
+                try:
+                    async with self._cmd_lock:
+                        active_mode = await self.mc.commands.get_path_hash_mode()
+                except Exception as exc:
+                    logger.debug("get_path_hash_mode query error: %s", exc)
+
+            if active_mode is not None:
+                self.device_info["path_hash_mode"] = active_mode
+            else:
+                self.device_info["path_hash_mode"] = mode
+
+            results["path_hash_mode"] = path_mode_success or (active_mode == mode)
 
         # 2. GPS Coordinates via 0x0e
         lat = settings.get("latitude")

@@ -43,7 +43,7 @@
       "weatherAlarm": "0 7 * * *",
       "nws_alerts": true,
       "alertPollSeconds": 300,
-      "userAgent": "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)",
+      "userAgent": "openHopMeshHubBot/2.0.2 (https://github.com/Dhovin/meshhub-bot-openhop)",
       "ignore_severities": [
         "Minor",
         "Unknown"

@@ -16,7 +16,7 @@
         <div>
           <div class="brand-title-row">
             <h1>MeshHub Bot</h1>
-            <span class="version-pill" id="plugin-version">v2.0.1</span>
+            <span class="version-pill" id="plugin-version">v2.0.2</span>
           </div>
           <p class="subtitle">openHop Virtual Companion Automation &amp; Net Control</p>
         </div>
@@ -297,10 +297,17 @@
           <div class="card-header">
             <div>
               <h2>Companion Path Hash Byte Policy</h2>
-              <p class="card-sub">Packet routing hash width hot-applied over TCP (MeshCore command 0x3D)</p>
+              <p class="card-sub">Packet routing hash width hot-applied over TCP (MeshCore 0x3D, CLI, and custom vars)</p>
+            </div>
+            <div>
+              <span class="pill" id="badge-active-pathhash">Mode: 1-Byte (0)</span>
             </div>
           </div>
           <form id="form-companion-hash">
+            <div class="advisory-banner mb-16">
+              <strong>ℹ️ openHop Repeater Notice:</strong> On openHop Repeater, physical LoRa on-air packet headers are governed by the host repeater daemon setting <code>mesh.path_hash_mode</code> in <code>/etc/openhop_repeater/config.yaml</code> (or Balena/Docker variable <code>PATHHASH</code>). MeshHub Bot pushes the companion protocol frame, CLI command, and custom vars over TCP, but ensure your host repeater's <code>config.yaml</code> also has <code>path_hash_mode: 1</code> (or <code>2</code>) to transmit multi-byte frames over the transceiver.
+            </div>
+
             <div class="form-group">
               <label for="cfg-comp-pathhash">Path Hash Mode</label>
               <select id="cfg-comp-pathhash">

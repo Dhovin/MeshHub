@@ -156,7 +156,7 @@ class WeatherBotModule(BaseModule):
         self.nws_alerts_enabled: bool = True
         self.alert_poll_seconds: int = 300
         self.user_agent: str = (
-            "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)"
+            "openHopMeshHubBot/2.0.2 (https://github.com/Dhovin/meshhub-bot-openhop)"
         )
         self.ignore_severities: list[str] = ["Minor", "Unknown"]
         self.ignore_events: list[str] = []

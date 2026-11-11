@@ -571,6 +571,10 @@ class BotHub:
                 "channels": companion_channels,
                 "required_channels": req_channels,
                 "settings": self.config.get("companion", {}),
+                "active_path_hash_mode": self.mesh_client.device_info.get(
+                    "path_hash_mode",
+                    self.config.get("companion", {}).get("pathHashMode", 0),
+                ),
             },
             "device_info": self.mesh_client.device_info,
             "timezone": self.timezone,

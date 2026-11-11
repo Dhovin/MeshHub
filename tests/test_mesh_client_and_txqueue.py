@@ -157,6 +157,16 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
             hash_called.append(mode)
             return FakeEvent(EventType.OK, {})
 
+        cli_called = []
+        async def fake_run_cli(cmd):
+            cli_called.append(cmd)
+            return FakeEvent(EventType.OK, {})
+
+        cvar_called = []
+        async def fake_set_cvar(key, val):
+            cvar_called.append((key, val))
+            return FakeEvent(EventType.OK, {})
+
         other_called = []
         async def fake_set_other(**kwargs):
             other_called.append(kwargs)
@@ -164,6 +174,9 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
 
         client.mc.commands.set_coords = AsyncMock(side_effect=fake_set_coords)
         client.mc.commands.set_path_hash_mode = AsyncMock(side_effect=fake_set_path_hash)
+        client.mc.commands.run_cli_command = AsyncMock(side_effect=fake_run_cli)
+        client.mc.commands.set_custom_var = AsyncMock(side_effect=fake_set_cvar)
+        client.mc.commands.get_path_hash_mode = AsyncMock(return_value=2)
         client.mc.commands.set_other_params = AsyncMock(side_effect=fake_set_other)
         client.mc.commands.send_appstart = AsyncMock(return_value=FakeEvent(EventType.OK, {
             "manual_add_contacts": False,
@@ -182,6 +195,9 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
         res = await client.apply_companion_settings(settings)
         self.assertTrue(res["ok"])
         self.assertEqual(hash_called, [2])
+        self.assertEqual(cli_called, ["set path.hash.mode 2"])
+        self.assertIn(("path.hash.mode", "2"), cvar_called)
+        self.assertEqual(client.device_info.get("path_hash_mode"), 2)
         self.assertEqual(coords_called, [(32.8998, -97.3473)])
         self.assertEqual(len(other_called), 1)
         self.assertEqual(other_called[0]["advert_loc_policy"], 2)

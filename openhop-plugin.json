@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "openhop.meshhub-bot",
   "name": "MeshHub Bot",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "MeshCore companion bot for openHop Repeater with Autoresponder, US NWS Weather & Alerts, and Radio Net.",
   "runtime": {
     "type": "python",
@@ -58,7 +58,7 @@
           "weatherAlarm": "0 7 * * *",
           "nws_alerts": true,
           "alertPollSeconds": 300,
-          "userAgent": "openHopMeshHubBot/2.0.1 (https://github.com/Dhovin/meshhub-bot-openhop)",
+          "userAgent": "openHopMeshHubBot/2.0.2 (https://github.com/Dhovin/meshhub-bot-openhop)",
           "ignore_severities": [
             "Minor",
             "Unknown"

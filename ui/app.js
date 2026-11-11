@@ -643,6 +643,21 @@ function renderCompanionTab() {
     }
   }
 
+  // Active Path Hash Mode badge
+  const hashBadge = document.getElementById("badge-active-pathhash");
+  if (hashBadge) {
+    const activeHash =
+      currentRuntime &&
+      currentRuntime.companion &&
+      currentRuntime.companion.active_path_hash_mode !== undefined
+        ? currentRuntime.companion.active_path_hash_mode
+        : ((currentConfig && currentConfig.companion && currentConfig.companion.pathHashMode) || 0);
+    const mNum = Number(activeHash);
+    const label = mNum === 1 ? "Mode 1 (2-Byte)" : (mNum === 2 ? "Mode 2 (3-Byte)" : "Mode 0 (1-Byte)");
+    hashBadge.textContent = `Active: ${label}`;
+    hashBadge.classList.toggle("active", mNum > 0);
+  }
+
   // Ad-hoc channel dropdown & channel table
   const comp = (currentRuntime && currentRuntime.companion) || {};
   const channels =
