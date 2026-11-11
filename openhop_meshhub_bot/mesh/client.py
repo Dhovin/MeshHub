@@ -681,6 +681,80 @@ class MeshCompanionClient:
             contact = self.mc.get_contact_by_name(identifier)
         return contact
 
+    async def apply_companion_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Apply path hash byte policy, GPS coordinates, and advert location policy to companion."""
+        if not self.mc or not self.is_connected:
+            return {"ok": False, "error": "Virtual Companion not connected"}
+
+        results: dict[str, Any] = {}
+
+        # 1. Path Hash Byte Policy (1-byte: 0, 2-byte: 1, 3-byte: 2) via 0x3d\0
+        path_hash = settings.get("pathHashMode")
+        if path_hash is not None and hasattr(self.mc.commands, "set_path_hash_mode"):
+            mode = max(0, min(2, int(path_hash)))
+            try:
+                async with self._cmd_lock:
+                    ev = await self.mc.commands.set_path_hash_mode(mode)
+                is_err = hasattr(ev, "type") and ev.type == EventType.ERROR
+                results["path_hash_mode"] = not is_err
+                logger.info("Configured companion path hash mode to %d-byte (mode=%d)", mode + 1, mode)
+            except Exception as exc:
+                logger.warning("Failed to set path hash mode: %s", exc)
+                results["path_hash_mode"] = False
+
+        # 2. GPS Coordinates via 0x0e
+        lat = settings.get("latitude")
+        lon = settings.get("longitude")
+        if lat is not None and lon is not None and hasattr(self.mc.commands, "set_coords"):
+            try:
+                lat_f = float(lat)
+                lon_f = float(lon)
+                async with self._cmd_lock:
+                    ev = await self.mc.commands.set_coords(lat_f, lon_f)
+                is_err = hasattr(ev, "type") and ev.type == EventType.ERROR
+                results["coords"] = not is_err
+                logger.info("Configured companion coordinates to (%.4f, %.4f)", lat_f, lon_f)
+            except Exception as exc:
+                logger.warning("Failed to set coordinates: %s", exc)
+                results["coords"] = False
+
+        # 3. Advert Location Policy & Location Telemetry via 0x26
+        loc_policy = max(0, min(2, int(settings.get("advLocPolicy", 1))))
+        tel_loc = 1 if settings.get("telemetryLoc", False) else 0
+        if hasattr(self.mc.commands, "set_other_params"):
+            try:
+                manual_contacts = False
+                tel_base = 1
+                tel_env = 0
+                if hasattr(self.mc.commands, "send_appstart"):
+                    async with self._cmd_lock:
+                        res = await self.mc.commands.send_appstart()
+                    if res and hasattr(res, "payload") and isinstance(res.payload, dict):
+                        manual_contacts = bool(res.payload.get("manual_add_contacts", False))
+                        tel_base = int(res.payload.get("telemetry_mode_base", 1))
+                        tel_env = int(res.payload.get("telemetry_mode_env", 0))
+
+                async with self._cmd_lock:
+                    ev = await self.mc.commands.set_other_params(
+                        manual_add_contacts=manual_contacts,
+                        telemetry_mode_base=tel_base,
+                        telemetry_mode_loc=tel_loc,
+                        telemetry_mode_env=tel_env,
+                        advert_loc_policy=loc_policy,
+                    )
+                is_err = hasattr(ev, "type") and ev.type == EventType.ERROR
+                results["loc_policy"] = not is_err
+                logger.info(
+                    "Configured companion advert location policy to %d (telemetry_loc=%d)",
+                    loc_policy,
+                    tel_loc,
+                )
+            except Exception as exc:
+                logger.warning("Failed to set location policy / telemetry: %s", exc)
+                results["loc_policy"] = False
+
+        return {"ok": True, "results": results}
+
     async def send_advert(self, *, flood: bool = True) -> dict[str, Any]:
         """Broadcast a self advertisement with a 60-second cooldown."""
         if not self.mc or not self.is_connected:

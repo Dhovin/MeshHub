@@ -243,6 +243,81 @@
         </article>
       </div>
 
+      <div class="grid-2 mt-16">
+        <!-- Companion GPS Settings -->
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h2>Companion GPS &amp; Advert Policy</h2>
+              <p class="card-sub">Station coordinates &amp; advertisement privacy hot-applied over TCP (0x0E &amp; 0x26)</p>
+            </div>
+          </div>
+          <form id="form-companion-gps">
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="cfg-comp-lat">Station Latitude (°)</label>
+                <input type="number" id="cfg-comp-lat" step="0.0001" min="-90" max="90" placeholder="32.8998" required />
+              </div>
+              <div class="form-group">
+                <label for="cfg-comp-lon">Station Longitude (°)</label>
+                <input type="number" id="cfg-comp-lon" step="0.0001" min="-180" max="180" placeholder="-97.3473" required />
+              </div>
+            </div>
+
+            <div class="btn-row mb-12">
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-detect-gps">Detect from Browser GPS</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-weather-coords">Copy from Weather Bot</button>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-comp-locpolicy">Advert Location Policy</label>
+              <select id="cfg-comp-locpolicy">
+                <option value="0">0 - None (Hide coordinates from adverts)</option>
+                <option value="1">1 - Approximate (~10 km fuzzing)</option>
+                <option value="2">2 - Precise (Exact GPS fix)</option>
+              </select>
+              <span class="hint">Governs how position coordinates are broadcasted in periodic node advertisements.</span>
+            </div>
+
+            <div class="form-group">
+              <label class="inline-check">
+                <input type="checkbox" id="cfg-comp-telloc" />
+                <span>Broadcast periodic GPS location telemetry packets over the mesh</span>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Save Companion GPS Settings</button>
+            </div>
+          </form>
+        </article>
+
+        <!-- Companion Path Hash Byte Policy -->
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h2>Companion Path Hash Byte Policy</h2>
+              <p class="card-sub">Packet routing hash width hot-applied over TCP (MeshCore command 0x3D)</p>
+            </div>
+          </div>
+          <form id="form-companion-hash">
+            <div class="form-group">
+              <label for="cfg-comp-pathhash">Path Hash Mode</label>
+              <select id="cfg-comp-pathhash">
+                <option value="0">1-Byte Path Hash (Mode 0) — Lowest airtime overhead</option>
+                <option value="1">2-Byte Path Hash (Mode 1) — Balanced mesh routing</option>
+                <option value="2">3-Byte Path Hash (Mode 2) — Maximum collision resistance</option>
+              </select>
+              <span class="hint">Configures whether outbound packets transmit with 1-byte, 2-byte, or 3-byte hash identifiers per hop.</span>
+            </div>
+
+            <div class="form-actions mt-16">
+              <button type="submit" class="btn btn-primary">Save Path Hash Policy</button>
+            </div>
+          </form>
+        </article>
+      </div>
+
       <!-- Companion Channels Table -->
       <article class="card mt-16">
         <div class="card-header">

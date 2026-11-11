@@ -143,5 +143,42 @@ class TestConfigMigration(unittest.TestCase):
         self.assertNotIn("_cmd", redacted)
 
 
+    def test_companion_gps_and_path_hash_validation_and_migration(self):
+        self.assertIn("companion", DEFAULT_CONFIG)
+        comp = DEFAULT_CONFIG["companion"]
+        self.assertEqual(comp["pathHashMode"], 0)
+        self.assertEqual(comp["latitude"], 32.8998)
+        self.assertEqual(comp["longitude"], -97.3473)
+        self.assertEqual(comp["advLocPolicy"], 1)
+        self.assertFalse(comp["telemetryLoc"])
+
+        # Migration from legacy config without companion section
+        legacy = {
+            "connection": {"host": "192.168.1.50", "tcpPort": 5055},
+        }
+        migrated, _ = migrate_config(legacy)
+        self.assertEqual(migrated["companion"]["host"], "192.168.1.50")
+        self.assertEqual(migrated["companion"]["tcpPort"], 5055)
+        self.assertEqual(migrated["companion"]["pathHashMode"], 0)
+        self.assertEqual(migrated["companion"]["latitude"], 32.8998)
+
+        # Clamping and normalization
+        out_of_bounds = {
+            "companion": {
+                "pathHashMode": 99,
+                "latitude": 150.0,
+                "longitude": -300.0,
+                "advLocPolicy": 5,
+                "telemetryLoc": "true",
+            }
+        }
+        migrated2, _ = migrate_config(out_of_bounds)
+        self.assertEqual(migrated2["companion"]["pathHashMode"], 2)
+        self.assertEqual(migrated2["companion"]["latitude"], 90.0)
+        self.assertEqual(migrated2["companion"]["longitude"], -180.0)
+        self.assertEqual(migrated2["companion"]["advLocPolicy"], 2)
+        self.assertTrue(migrated2["companion"]["telemetryLoc"])
+
+
 if __name__ == "__main__":
     unittest.main()

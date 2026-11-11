@@ -4,6 +4,15 @@
     "host": "127.0.0.1",
     "tcpPort": 5051
   },
+  "companion": {
+    "host": "127.0.0.1",
+    "tcpPort": 5051,
+    "pathHashMode": 0,
+    "latitude": 32.8998,
+    "longitude": -97.3473,
+    "advLocPolicy": 1,
+    "telemetryLoc": false
+  },
   "core": {
     "timezone": "America/Chicago",
     "perUserRateLimitSeconds": 30,
@@ -40,8 +49,8 @@
         "Unknown"
       ],
       "ignore_events": [],
-      "alertTemplate": "⚠️ {event} ({severity}) for {region} until {end}: {headline}",
-      "clearTemplate": "🟢 CLEAR: {event} has ended for {region}.",
+      "alertTemplate": "\u26a0\ufe0f {event} ({severity}) for {region} until {end}: {headline}",
+      "clearTemplate": "\ud83d\udfe2 CLEAR: {event} has ended for {region}.",
       "forecastTemplate": ""
     },
     "net_bot": {

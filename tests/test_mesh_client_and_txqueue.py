@@ -142,5 +142,51 @@ class TestMeshClientAndTxQueue(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(dispatched[0][2].endswith("..."))
 
 
+    async def test_companion_apply_settings(self):
+        client = MeshCompanionClient(host="127.0.0.1", port=5051)
+        client.is_connected = True
+        client.mc = MagicMock()
+
+        coords_called = []
+        async def fake_set_coords(lat, lon):
+            coords_called.append((lat, lon))
+            return FakeEvent(EventType.OK, {})
+
+        hash_called = []
+        async def fake_set_path_hash(mode):
+            hash_called.append(mode)
+            return FakeEvent(EventType.OK, {})
+
+        other_called = []
+        async def fake_set_other(**kwargs):
+            other_called.append(kwargs)
+            return FakeEvent(EventType.OK, {})
+
+        client.mc.commands.set_coords = AsyncMock(side_effect=fake_set_coords)
+        client.mc.commands.set_path_hash_mode = AsyncMock(side_effect=fake_set_path_hash)
+        client.mc.commands.set_other_params = AsyncMock(side_effect=fake_set_other)
+        client.mc.commands.send_appstart = AsyncMock(return_value=FakeEvent(EventType.OK, {
+            "manual_add_contacts": False,
+            "telemetry_mode_base": 1,
+            "telemetry_mode_env": 0,
+        }))
+
+        settings = {
+            "pathHashMode": 2,
+            "latitude": 32.8998,
+            "longitude": -97.3473,
+            "advLocPolicy": 2,
+            "telemetryLoc": True,
+        }
+
+        res = await client.apply_companion_settings(settings)
+        self.assertTrue(res["ok"])
+        self.assertEqual(hash_called, [2])
+        self.assertEqual(coords_called, [(32.8998, -97.3473)])
+        self.assertEqual(len(other_called), 1)
+        self.assertEqual(other_called[0]["advert_loc_policy"], 2)
+        self.assertEqual(other_called[0]["telemetry_mode_loc"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

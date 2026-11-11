@@ -23,6 +23,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "host": "127.0.0.1",
         "tcpPort": 5051,
     },
+    "companion": {
+        "host": "127.0.0.1",
+        "tcpPort": 5051,
+        "pathHashMode": 0,
+        "latitude": 32.8998,
+        "longitude": -97.3473,
+        "advLocPolicy": 1,
+        "telemetryLoc": False,
+    },
     "core": {
         "timezone": "America/Chicago",
         "perUserRateLimitSeconds": 30,
@@ -264,6 +273,42 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         conn["tcpPort"] = max(1, min(65535, int(conn.get("tcpPort", 5051))))
     except (ValueError, TypeError):
         conn["tcpPort"] = 5051
+
+    comp = merged.setdefault("companion", {})
+    if "companion" not in working and "connection" in working:
+        if "host" in working["connection"]:
+            comp["host"] = conn["host"]
+        if "tcpPort" in working["connection"]:
+            comp["tcpPort"] = conn["tcpPort"]
+    comp["host"] = str(comp.get("host") or conn["host"]).strip() or "127.0.0.1"
+    conn["host"] = comp["host"]
+    try:
+        comp["tcpPort"] = max(1, min(65535, int(comp.get("tcpPort") or conn["tcpPort"])))
+    except (ValueError, TypeError):
+        comp["tcpPort"] = 5051
+    conn["tcpPort"] = comp["tcpPort"]
+
+    try:
+        comp["pathHashMode"] = max(0, min(2, int(comp.get("pathHashMode", 0))))
+    except (ValueError, TypeError):
+        comp["pathHashMode"] = 0
+
+    try:
+        comp["latitude"] = max(-90.0, min(90.0, float(comp.get("latitude", 32.8998))))
+    except (ValueError, TypeError):
+        comp["latitude"] = 32.8998
+
+    try:
+        comp["longitude"] = max(-180.0, min(180.0, float(comp.get("longitude", -97.3473))))
+    except (ValueError, TypeError):
+        comp["longitude"] = -97.3473
+
+    try:
+        comp["advLocPolicy"] = max(0, min(2, int(comp.get("advLocPolicy", 1))))
+    except (ValueError, TypeError):
+        comp["advLocPolicy"] = 1
+
+    comp["telemetryLoc"] = bool(comp.get("telemetryLoc", False))
 
     # Normalize weather alarm
     wx_merged = merged["modules"]["weather_bot"]

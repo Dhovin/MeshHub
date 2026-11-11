@@ -931,6 +931,19 @@ function populateFormsFromConfig(cfg) {
     core.txRateLimitSeconds !== undefined ? core.txRateLimitSeconds : 1.5;
   document.getElementById("cfg-core-activity").checked = core.activityLog !== false;
 
+  // Companion GPS & Path Hash
+  const comp = cfg.companion || {};
+  const compLat = document.getElementById("cfg-comp-lat");
+  if (compLat) compLat.value = comp.latitude !== undefined ? comp.latitude : 32.8998;
+  const compLon = document.getElementById("cfg-comp-lon");
+  if (compLon) compLon.value = comp.longitude !== undefined ? comp.longitude : -97.3473;
+  const compLocPol = document.getElementById("cfg-comp-locpolicy");
+  if (compLocPol) compLocPol.value = String(comp.advLocPolicy !== undefined ? comp.advLocPolicy : 1);
+  const compPathHash = document.getElementById("cfg-comp-pathhash");
+  if (compPathHash) compPathHash.value = String(comp.pathHashMode !== undefined ? comp.pathHashMode : 0);
+  const compTelLoc = document.getElementById("cfg-comp-telloc");
+  if (compTelLoc) compTelLoc.checked = comp.telemetryLoc === true;
+
   // Autoresponder
   const ar = mods.autoresponce || {};
   document.getElementById("cfg-ar-enabled").checked = ar.enabled !== false;
@@ -1183,10 +1196,18 @@ function setupEventListeners() {
   // Form 1: Core & Connection
   document.getElementById("form-core").addEventListener("submit", (e) => {
     e.preventDefault();
+    const hostVal = document.getElementById("cfg-conn-host").value.trim() || "127.0.0.1";
+    const portVal = Number(document.getElementById("cfg-conn-port").value || 5051);
+    const existingComp = (currentConfig && currentConfig.companion) || {};
     savePluginConfigPatch({
       connection: {
-        host: document.getElementById("cfg-conn-host").value.trim() || "127.0.0.1",
-        tcpPort: Number(document.getElementById("cfg-conn-port").value || 5051),
+        host: hostVal,
+        tcpPort: portVal,
+      },
+      companion: {
+        ...existingComp,
+        host: hostVal,
+        tcpPort: portVal,
       },
       core: {
         timezone: document.getElementById("cfg-core-tz").value.trim() || "America/Chicago",
@@ -1198,6 +1219,79 @@ function setupEventListeners() {
       },
     });
   });
+
+  // GPS: Detect from Browser GPS
+  const btnDetectGps = document.getElementById("btn-detect-gps");
+  if (btnDetectGps) {
+    btnDetectGps.addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        showToast("Geolocation is not supported by this browser.", true);
+        return;
+      }
+      btnDetectGps.disabled = true;
+      btnDetectGps.textContent = "Detecting...";
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          btnDetectGps.disabled = false;
+          btnDetectGps.textContent = "Detect from Browser GPS";
+          document.getElementById("cfg-comp-lat").value = pos.coords.latitude.toFixed(4);
+          document.getElementById("cfg-comp-lon").value = pos.coords.longitude.toFixed(4);
+          showToast(`Detected location: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`, false);
+        },
+        (err) => {
+          btnDetectGps.disabled = false;
+          btnDetectGps.textContent = "Detect from Browser GPS";
+          showToast(`GPS detection error: ${err.message}`, true);
+        },
+        { timeout: 10000, enableHighAccuracy: true }
+      );
+    });
+  }
+
+  // GPS: Copy from Weather Bot
+  const btnCopyWx = document.getElementById("btn-copy-weather-coords");
+  if (btnCopyWx) {
+    btnCopyWx.addEventListener("click", () => {
+      const wxLat = document.getElementById("cfg-wx-lat")?.value || (currentConfig?.modules?.weather_bot?.latitude) || 32.8998;
+      const wxLon = document.getElementById("cfg-wx-lon")?.value || (currentConfig?.modules?.weather_bot?.longitude) || -97.3473;
+      document.getElementById("cfg-comp-lat").value = wxLat;
+      document.getElementById("cfg-comp-lon").value = wxLon;
+      showToast(`Copied coordinates (${wxLat}, ${wxLon}) from Weather Bot.`, false);
+    });
+  }
+
+  // Form: Companion GPS Settings
+  const formCompGps = document.getElementById("form-companion-gps");
+  if (formCompGps) {
+    formCompGps.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const existingComp = (currentConfig && currentConfig.companion) || {};
+      savePluginConfigPatch({
+        companion: {
+          ...existingComp,
+          latitude: Number(document.getElementById("cfg-comp-lat").value || 32.8998),
+          longitude: Number(document.getElementById("cfg-comp-lon").value || -97.3473),
+          advLocPolicy: Number(document.getElementById("cfg-comp-locpolicy").value || 1),
+          telemetryLoc: document.getElementById("cfg-comp-telloc").checked,
+        },
+      });
+    });
+  }
+
+  // Form: Companion Path Hash Byte Policy
+  const formCompHash = document.getElementById("form-companion-hash");
+  if (formCompHash) {
+    formCompHash.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const existingComp = (currentConfig && currentConfig.companion) || {};
+      savePluginConfigPatch({
+        companion: {
+          ...existingComp,
+          pathHashMode: Number(document.getElementById("cfg-comp-pathhash").value || 0),
+        },
+      });
+    });
+  }
 
   // Form 2: Autoresponder
   document.getElementById("form-autoresponder").addEventListener("submit", (e) => {

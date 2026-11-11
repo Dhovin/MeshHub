@@ -305,6 +305,9 @@ class BotHub:
 
     async def _on_companion_connected(self) -> None:
         """Hook called every time the Virtual Companion TCP session completes handshake."""
+        comp_cfg = self.config.get("companion", {})
+        if comp_cfg:
+            await self.mesh_client.apply_companion_settings(comp_cfg)
         req_channels = self.collect_required_channels()
         if req_channels:
             await self.mesh_client.provision_channels(req_channels)
@@ -375,8 +378,11 @@ class BotHub:
         for mod_name, mod in self.modules.items():
             mod.apply_config(mods_cfg.get(mod_name, {}))
 
-        # Re-provision any newly required channels on the companion (additive-only)
+        # Apply companion settings (path hash mode, GPS coords, advert policy) if connected
         if self.mesh_client.is_connected:
+            comp_cfg = self.config.get("companion", {})
+            if comp_cfg:
+                await self.mesh_client.apply_companion_settings(comp_cfg)
             req_channels = self.collect_required_channels()
             if req_channels:
                 await self.mesh_client.provision_channels(req_channels)
@@ -564,6 +570,7 @@ class BotHub:
                 "last_error": self.mesh_client.last_error,
                 "channels": companion_channels,
                 "required_channels": req_channels,
+                "settings": self.config.get("companion", {}),
             },
             "device_info": self.mesh_client.device_info,
             "timezone": self.timezone,
