@@ -21,39 +21,65 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                 return {"ok": True}
 
             hub.tx_queue._send_fn = capture_send
+            hub.tx_queue.min_interval_seconds = 0.001
             ar = hub.modules["autoresponce"]
             ar.apply_config(
                 {
                     "enabled": True,
                     "channels": ["#test"],
-                    "keywords": ["PiNg", "TeSt", "AcK"],
+                    "keywords": ["PiNg", "TeSt"],
+                    "exactMatch": True,
                     "maxHops": 4,
                     "responseTemplate": "@[{sender}] ACK ({hops_label})",
                 }
             )
 
-            # Uppercase keyword match and hops <= 4
+            # Standalone uppercase keyword match with punctuation and hops <= 4
             await ar.on_message(
-                {"sender": "Alice", "text": "PING CHECK", "channel": "#test", "hops": 2}
+                {"sender": "Alice", "text": "PING!", "channel": "#test", "hops": 2}
             )
             await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 1)
             self.assertEqual(sent[0][2], "@[Alice] ACK (2 hops)")
 
-            # Mixed case keyword match
+            # Mention prefix with standalone keyword
             await ar.on_message(
-                {"sender": "Charlie", "text": "aCk please", "channel": "#test", "hops": 0}
+                {"sender": "Charlie", "text": "@[MeshHub] tEsT", "channel": "#test", "hops": 0}
             )
             await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 2)
             self.assertEqual(sent[1][2], "@[Charlie] ACK (Direct (0 hops))")
 
-            # Exceeding maxHops -> ignored
+            # Conversational sentence with keyword embedded -> ignored when exactMatch is True
             await ar.on_message(
-                {"sender": "Bob", "text": "ping check", "channel": "#test", "hops": 6}
+                {"sender": "Dave", "text": "Can you test this link?", "channel": "#test", "hops": 1}
             )
             await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 2)
+
+            # Conversational extra words -> ignored
+            await ar.on_message(
+                {"sender": "Eve", "text": "ping check", "channel": "#test", "hops": 1}
+            )
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(sent), 2)
+
+            # Exceeding maxHops -> ignored
+            await ar.on_message(
+                {"sender": "Bob", "text": "ping", "channel": "#test", "hops": 6}
+            )
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(sent), 2)
+
+            # When exactMatch is False, substring matches work
+            ar.apply_config(
+                {"enabled": True, "channels": ["#test"], "exactMatch": False, "keywords": ["ping"]}
+            )
+            await ar.on_message(
+                {"sender": "Frank", "text": "ping check", "channel": "#test", "hops": 1}
+            )
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(sent), 3)
 
     async def test_weather_bot_bare_zipcode_in_channel_and_default_location(self):
         with tempfile.TemporaryDirectory() as tmpdir:

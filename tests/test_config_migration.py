@@ -67,7 +67,8 @@ class TestConfigMigration(unittest.TestCase):
         self.assertEqual(wx["zipCode"], "")
 
         ar = migrated["modules"]["autoresponce"]
-        self.assertEqual(ar["keywords"], ["test"])
+        self.assertEqual(ar["keywords"], ["test", "ping"])
+        self.assertTrue(ar["exactMatch"])
         self.assertIn("timezone", migrated["core"])
         self.assertNotIn("meshwars_bot", migrated["modules"])
 
@@ -111,6 +112,15 @@ class TestConfigMigration(unittest.TestCase):
     def test_hhmm_weather_alarm_normalized_to_cron(self):
         cfg, _ = migrate_config({"modules": {"weather_bot": {"weatherAlarm": "06:30"}}})
         self.assertEqual(cfg["modules"]["weather_bot"]["weatherAlarm"], "30 6 * * *")
+
+    def test_autoresponder_strips_legacy_ack_and_adds_exact_match(self):
+        cfg, changed = migrate_config(
+            {"modules": {"autoresponce": {"keywords": ["test", "ping", "ack"]}}}
+        )
+        self.assertTrue(changed)
+        ar = cfg["modules"]["autoresponce"]
+        self.assertEqual(ar["keywords"], ["test", "ping"])
+        self.assertTrue(ar["exactMatch"])
 
     def test_load_config_strips_runtime_from_disk(self):
         with tempfile.TemporaryDirectory() as tmpdir:

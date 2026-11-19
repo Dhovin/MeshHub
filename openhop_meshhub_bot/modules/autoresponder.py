@@ -18,7 +18,8 @@ class AutoresponderModule(BaseModule):
 
     def __init__(self, hub: Any, config: dict[str, Any]):
         self.channels: list[str] = ["#test"]
-        self.keywords: list[str] = ["test", "ping", "ack"]
+        self.keywords: list[str] = ["test", "ping"]
+        self.exact_match: bool = True
         self.max_hops: int | None = 12
         self.response_template: str = "@[{sender}] ACK | Path: {hops_label}"
         self.match_count: int = 0
@@ -36,14 +37,16 @@ class AutoresponderModule(BaseModule):
             raw_channels = ["#test"]
         self.channels = raw_channels or ["#test"]
 
-        raw_keywords = self.config.get("keywords", ["test"])
+        raw_keywords = self.config.get("keywords", ["test", "ping"])
         if isinstance(raw_keywords, str):
             raw_keywords = [x.strip() for x in raw_keywords.split(",") if x.strip()]
         elif isinstance(raw_keywords, list):
             raw_keywords = [str(x).strip() for x in raw_keywords if str(x).strip()]
         else:
-            raw_keywords = ["test"]
-        self.keywords = raw_keywords or ["test"]
+            raw_keywords = ["test", "ping"]
+        self.keywords = raw_keywords or ["test", "ping"]
+
+        self.exact_match = bool(self.config.get("exactMatch", True))
 
         raw_hops = self.config.get("maxHops", 12)
         if raw_hops is None or str(raw_hops).strip().lower() in ("", "none", "unlimited"):
@@ -66,15 +69,22 @@ class AutoresponderModule(BaseModule):
     def _matches_keyword(self, text: str) -> bool:
         clean = re.sub(r"^@\[[^\]]+\]\s*", "", str(text or "")).strip()
         clean = re.sub(r"^[^:\[\]\r\n]{1,40}:\s+", "", clean).strip()
-        lower = clean.casefold()
+        clean_punct = clean.strip(" \t\r\n!?,.:;-")
+        lower = clean_punct.casefold()
         if not lower:
             return False
         for kw in self.keywords:
             k = str(kw or "").strip().casefold()
             if not k:
                 continue
-            if k == "*" or k in lower:
+            if k == "*":
                 return True
+            if self.exact_match:
+                if lower == k:
+                    return True
+            else:
+                if k in lower:
+                    return True
         return False
 
     async def on_message(self, msg: dict[str, Any]) -> None:
@@ -156,6 +166,7 @@ class AutoresponderModule(BaseModule):
             "enabled": self.enabled,
             "channels": self.channels,
             "keywords": self.keywords,
+            "exactMatch": self.exact_match,
             "maxHops": self.max_hops,
             "responseTemplate": self.response_template,
             "match_count": self.match_count,

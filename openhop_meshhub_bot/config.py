@@ -42,7 +42,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "autoresponce": {
             "enabled": True,
             "channels": ["#test"],
-            "keywords": ["test", "ping", "ack"],
+            "keywords": ["test", "ping"],
+            "exactMatch": True,
             "maxHops": 12,
             "responseTemplate": "@[{sender}] ACK | Path: {hops_label}",
         },
@@ -56,7 +57,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "weatherAlarm": "0 7 * * *",
             "nws_alerts": True,
             "alertPollSeconds": 300,
-            "userAgent": "openHopMeshHubBot/2.0.2 (https://github.com/Dhovin/meshhub-bot-openhop)",
+            "userAgent": "openHopMeshHubBot/2.0.3 (https://github.com/Dhovin/meshhub-bot-openhop)",
             "ignore_severities": ["Minor", "Unknown"],
             "ignore_events": [],
             "alertTemplate": "⚠️ {event} ({severity}) for {region} until {end}: {headline}",
@@ -244,7 +245,16 @@ def migrate_config(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     ar_in = modules_in.get("autoresponce")
     if isinstance(ar_in, dict):
         if "keywords" not in ar_in or not isinstance(ar_in.get("keywords"), list):
-            ar_in["keywords"] = ["test"]
+            ar_in["keywords"] = ["test", "ping"]
+            migrated_any = True
+        elif any(str(k).strip().lower() == "ack" for k in ar_in["keywords"]):
+            ar_in["keywords"] = [k for k in ar_in["keywords"] if str(k).strip().lower() != "ack"]
+            if not ar_in["keywords"]:
+                ar_in["keywords"] = ["test", "ping"]
+            migrated_any = True
+        if "exactMatch" not in ar_in:
+            ar_in["exactMatch"] = True
+            migrated_any = True
 
     merged = deep_merge(DEFAULT_CONFIG, working)
     merged["schema_version"] = SCHEMA_VERSION

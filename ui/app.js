@@ -967,7 +967,9 @@ function populateFormsFromConfig(cfg) {
     : ar.channels || "#test";
   document.getElementById("cfg-ar-keywords").value = Array.isArray(ar.keywords)
     ? ar.keywords.join(", ")
-    : ar.keywords || "test, ping, ack";
+    : ar.keywords || "test, ping";
+  const arExact = document.getElementById("cfg-ar-exact");
+  if (arExact) arExact.checked = ar.exactMatch !== false;
   document.getElementById("cfg-ar-maxhops").value =
     ar.maxHops !== undefined && ar.maxHops !== null ? ar.maxHops : 12;
   const arTpl = ar.responseTemplate || "@[{sender}] ACK | Path: {hops_label}";
@@ -1326,7 +1328,8 @@ function setupEventListeners() {
         autoresponce: {
           enabled: document.getElementById("cfg-ar-enabled").checked,
           channels: channels.length ? channels : ["#test"],
-          keywords: keywords.length ? keywords : ["test"],
+          keywords: keywords.length ? keywords : ["test", "ping"],
+          exactMatch: document.getElementById("cfg-ar-exact") ? document.getElementById("cfg-ar-exact").checked : true,
           maxHops: Number(document.getElementById("cfg-ar-maxhops").value || 12),
           responseTemplate: document.getElementById("cfg-ar-template").value.trim(),
         },
