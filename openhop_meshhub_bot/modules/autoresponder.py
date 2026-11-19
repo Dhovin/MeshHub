@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 from ..mesh.text import extract_template_fields, format_template
@@ -11,6 +12,28 @@ from ..mesh.txqueue import PRIORITY_REPLY
 from .base import BaseModule
 
 logger = logging.getLogger("openhop.meshhub-bot.autoresponder")
+
+SPONGEBOB_TIMEOUT_SECONDS = 120.0
+
+SECRET_COMMANDS: dict[str, tuple[str, str]] = {
+    "!marco": ("Polo", "marco_polo"),
+    "!never": ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "secret_cmd"),
+}
+
+SPONGEBOB_STEPS: tuple[tuple[frozenset[str], str], ...] = (
+    (
+        frozenset({"!ready", "are ya ready kids", "are you ready kids"}),
+        "Aye, aye, Captain!",
+    ),
+    (
+        frozenset({"i cant hear you"}),
+        "AYE, AYE, CAPTAIN!",
+    ),
+    (
+        frozenset({"!pineapple", "who lives in a pineapple under the sea"}),
+        "SpongeBob SquarePants!",
+    ),
+)
 
 
 class AutoresponderModule(BaseModule):
@@ -24,6 +47,7 @@ class AutoresponderModule(BaseModule):
         self.response_template: str = "@[{sender}] ACK | Path: {hops_label}"
         self.match_count: int = 0
         self.last_match: dict[str, Any] | None = None
+        self._spongebob_state: dict[str, tuple[int, float]] = {}
         super().__init__("autoresponce", hub, config)
 
     def apply_config(self, config: dict[str, Any]) -> None:
@@ -73,8 +97,26 @@ class AutoresponderModule(BaseModule):
         # Preserve leading '!' so commands like '!marco' (or custom '!ping') match accurately
         return clean.lstrip(" \t\r\n?,.:;-").rstrip(" \t\r\n!?,.:;-").casefold()
 
-    def _is_secret_marco(self, text: str) -> bool:
-        return self._normalize_text(text) == "!marco"
+    def _normalize_secret_key(self, text: str) -> str:
+        norm = self._normalize_text(text)
+        if not norm:
+            return ""
+        return re.sub(r"\s+", " ", norm.replace("'", "").replace("\u2019", "").replace(",", "")).strip()
+
+    def _match_secret_command(self, text: str) -> tuple[str, str] | None:
+        key = self._normalize_secret_key(text)
+        if not key:
+            return None
+        return SECRET_COMMANDS.get(key)
+
+    def _match_spongebob_step(self, text: str) -> tuple[int, str] | None:
+        key = self._normalize_secret_key(text)
+        if not key:
+            return None
+        for idx, (triggers, reply) in enumerate(SPONGEBOB_STEPS):
+            if key in triggers:
+                return idx, reply
+        return None
 
     def _matches_keyword(self, text: str) -> bool:
         lower = self._normalize_text(text)
@@ -105,8 +147,10 @@ class AutoresponderModule(BaseModule):
             return
 
         text = str(msg.get("text", "")).strip()
-        is_marco = self._is_secret_marco(text)
-        if not is_marco and not self._matches_keyword(text):
+        secret = self._match_secret_command(text)
+        sb_match = None if secret is not None else self._match_spongebob_step(text)
+        is_keyword = False if (secret is not None or sb_match is not None) else self._matches_keyword(text)
+        if secret is None and sb_match is None and not is_keyword:
             return
 
         # Check if incoming channel matches any configured channel
@@ -117,6 +161,17 @@ class AutoresponderModule(BaseModule):
                 break
         if not matched_channel_name:
             return
+
+        ch_key = matched_channel_name.casefold()
+        now = time.monotonic()
+        if sb_match is not None:
+            step_idx = sb_match[0]
+            state = self._spongebob_state.get(ch_key)
+            if state is not None and now > state[1]:
+                self._spongebob_state.pop(ch_key, None)
+                state = None
+            if step_idx != 0 and (state is None or state[0] != step_idx):
+                return
 
         # Hop distance check
         hops = msg.get("hops")
@@ -135,15 +190,28 @@ class AutoresponderModule(BaseModule):
             )
             return
 
-        if not self.hub.can_send_user(sender):
+        # Enforce per-user rate limiting except for in-progress SpongeBob follow-up steps
+        is_sb_followup = sb_match is not None and sb_match[0] > 0
+        if not is_sb_followup and not self.hub.can_send_user(sender):
             logger.info("[autoresponce] Rate-limited sender '%s'", sender)
             return
 
-        if is_marco:
-            reply = "Polo"
+        if sb_match is not None:
+            step_idx = sb_match[0]
+            if step_idx + 1 < len(SPONGEBOB_STEPS):
+                self._spongebob_state[ch_key] = (step_idx + 1, now + SPONGEBOB_TIMEOUT_SECONDS)
+            else:
+                self._spongebob_state.pop(ch_key, None)
+
+        if secret is not None:
+            reply, activity_event = secret
+        elif sb_match is not None:
+            reply = sb_match[1]
+            activity_event = "secret_cmd"
         else:
             fields = extract_template_fields(msg, timezone_str=self.hub.timezone)
             reply = format_template(self.response_template, fields)
+            activity_event = "auto_ack"
 
         self.hub.record_user_send(sender)
         self.match_count += 1
@@ -157,7 +225,7 @@ class AutoresponderModule(BaseModule):
         }
         self.hub.record_activity(
             module="autoresponce",
-            event="marco_polo" if is_marco else "auto_ack",
+            event=activity_event,
             sender=sender,
             channel=matched_channel_name,
             detail=f"{text} -> {reply}",

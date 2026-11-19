@@ -142,6 +142,194 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 3)
 
+    async def test_autoresponder_secret_never_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hub = BotHub(data_dir=tmpdir)
+            sent = []
+
+            async def capture_send(target_type, target, text):
+                sent.append((target_type, target, text))
+                return {"ok": True}
+
+            hub.tx_queue._send_fn = capture_send
+            hub.tx_queue.min_interval_seconds = 0.001
+            ar = hub.modules["autoresponce"]
+            ar.apply_config(
+                {
+                    "enabled": True,
+                    "channels": ["#test"],
+                    "keywords": ["test", "ping"],
+                    "exactMatch": True,
+                    "maxHops": 4,
+                    "responseTemplate": "@[{sender}] ACK ({hops_label})",
+                }
+            )
+
+            await ar.on_message(
+                {"sender": "User1", "text": "!never", "channel": "#test", "hops": 1}
+            )
+            await ar.on_message(
+                {"sender": "User2", "text": "!NEVER!", "channel": "#test", "hops": 0}
+            )
+            await asyncio.sleep(0.05)
+            self.assertEqual(
+                [item[2] for item in sent],
+                [
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                ],
+            )
+            self.assertEqual(hub._activity[0]["event"], "secret_cmd")
+
+            # Ignored: missing '!', extra text, wrong channel, hops > maxHops
+            for msg in (
+                {"sender": "User3", "text": "never", "channel": "#test", "hops": 1},
+                {"sender": "User4", "text": "I would !never do that", "channel": "#test", "hops": 1},
+                {"sender": "User5", "text": "!never", "channel": "#general", "hops": 1},
+                {"sender": "User6", "text": "!never", "channel": "#test", "hops": 5},
+            ):
+                await ar.on_message(msg)
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(sent), 2)
+
+    async def test_autoresponder_secret_spongebob_commands(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hub = BotHub(data_dir=tmpdir)
+            sent = []
+
+            async def capture_send(target_type, target, text):
+                sent.append((target_type, target, text))
+                return {"ok": True}
+
+            hub.tx_queue._send_fn = capture_send
+            hub.tx_queue.min_interval_seconds = 0.001
+            ar = hub.modules["autoresponce"]
+            ar.apply_config(
+                {
+                    "enabled": True,
+                    "channels": ["#test"],
+                    "keywords": ["test", "ping"],
+                    "exactMatch": True,
+                    "maxHops": 4,
+                    "responseTemplate": "@[{sender}] ACK ({hops_label})",
+                }
+            )
+
+            clock = {"now": 100.0}
+            with patch(
+                "openhop_meshhub_bot.modules.autoresponder.time.monotonic",
+                side_effect=lambda: clock["now"],
+            ):
+                # 1. Out-of-order steps when idle are ignored
+                for msg in (
+                    {"sender": "Idle1", "text": "I can't hear you!", "channel": "#test", "hops": 1},
+                    {"sender": "Idle2", "text": "Who lives in a pineapple under the sea?", "channel": "#test", "hops": 1},
+                    {"sender": "Idle3", "text": "!pineapple", "channel": "#test", "hops": 1},
+                ):
+                    await ar.on_message(msg)
+                self.assertEqual(len(sent), 0)
+
+                # 2. Single user completes full 3-step sequence back-to-back within seconds
+                await ar.on_message(
+                    {"sender": "SingleUser", "text": "Are ya ready, kids?", "channel": "#test", "hops": 1}
+                )
+                clock["now"] = 102.0
+                await ar.on_message(
+                    {"sender": "SingleUser", "text": "I can't hear you!", "channel": "#test", "hops": 1}
+                )
+                clock["now"] = 105.0
+                await ar.on_message(
+                    {"sender": "SingleUser", "text": "Who lives in a pineapple under the sea?", "channel": "#test", "hops": 1}
+                )
+                # Repeating Step 2 after sequence completes is ignored
+                clock["now"] = 106.0
+                await ar.on_message(
+                    {"sender": "SingleUser2", "text": "!pineapple", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(
+                    [item[2] for item in sent],
+                    ["Aye, aye, Captain!", "AYE, AYE, CAPTAIN!", "SpongeBob SquarePants!"],
+                )
+                self.assertEqual(hub._activity[0]["event"], "secret_cmd")
+
+                # 3. Aliases & out-of-order Step 2 while waiting for Step 1 (does not break sequence)
+                clock["now"] = 200.0
+                await ar.on_message(
+                    {"sender": "AliasA", "text": "!ready", "channel": "#test", "hops": 1}
+                )
+                # Out-of-order Step 2 ignored while awaiting Step 1
+                await ar.on_message(
+                    {"sender": "AliasB", "text": "!pineapple", "channel": "#test", "hops": 1}
+                )
+                # Non-exact chat & wrong channel & excessive hops ignored without breaking state
+                await ar.on_message(
+                    {"sender": "AliasC", "text": "Are ya ready for the net?", "channel": "#test", "hops": 1}
+                )
+                await ar.on_message(
+                    {"sender": "AliasD", "text": "I can't hear you!", "channel": "#general", "hops": 1}
+                )
+                await ar.on_message(
+                    {"sender": "AliasE", "text": "I can't hear you!", "channel": "#test", "hops": 5}
+                )
+                await ar.on_message(
+                    {"sender": "AliasB", "text": "I can\u2019t hear you!", "channel": "#test", "hops": 0}
+                )
+                await ar.on_message(
+                    {"sender": "AliasF", "text": "!pineapple", "channel": "#test", "hops": 2}
+                )
+                self.assertEqual(
+                    [item[2] for item in sent[3:]],
+                    ["Aye, aye, Captain!", "AYE, AYE, CAPTAIN!", "SpongeBob SquarePants!"],
+                )
+
+                # Restart with "Are you ready kids" alias + verify non-! words ignored
+                clock["now"] = 250.0
+                await ar.on_message(
+                    {"sender": "AliasG", "text": "ready", "channel": "#test", "hops": 1}
+                )
+                await ar.on_message(
+                    {"sender": "AliasG", "text": "Are you ready kids", "channel": "#test", "hops": 1}
+                )
+                await ar.on_message(
+                    {"sender": "AliasH", "text": "i cant hear you", "channel": "#test", "hops": 1}
+                )
+                await ar.on_message(
+                    {"sender": "AliasI", "text": "pineapple", "channel": "#test", "hops": 1}
+                )
+                await ar.on_message(
+                    {"sender": "AliasI", "text": "!pineapple", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 9)
+
+                # 4. 2-minute (120.0s) timeout behavior
+                # Step 0 at t=1000 -> Step 1 at t=1121 (121s elapsed) expired & resets state
+                clock["now"] = 1000.0
+                await ar.on_message(
+                    {"sender": "TimeoutUser1", "text": "!ready", "channel": "#test", "hops": 1}
+                )
+                clock["now"] = 1121.0
+                await ar.on_message(
+                    {"sender": "TimeoutUser2", "text": "I can't hear you!", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 10)
+                self.assertNotIn("#test", ar._spongebob_state)
+
+                # Step 0 at t=1300 -> Step 1 at t=1400 (refreshes to 1520) -> Step 2 at t=1521 expired
+                clock["now"] = 1300.0
+                await ar.on_message(
+                    {"sender": "TimeoutUser3", "text": "!ready", "channel": "#test", "hops": 1}
+                )
+                clock["now"] = 1400.0
+                await ar.on_message(
+                    {"sender": "TimeoutUser3", "text": "I can't hear you!", "channel": "#test", "hops": 1}
+                )
+                clock["now"] = 1521.0
+                await ar.on_message(
+                    {"sender": "TimeoutUser3", "text": "!pineapple", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 12)
+                self.assertNotIn("#test", ar._spongebob_state)
+
     async def test_weather_bot_bare_zipcode_in_channel_and_default_location(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             hub = BotHub(data_dir=tmpdir)
