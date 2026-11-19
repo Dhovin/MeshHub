@@ -66,11 +66,18 @@ class AutoresponderModule(BaseModule):
             return []
         return list(self.channels)
 
-    def _matches_keyword(self, text: str) -> bool:
+    def _normalize_text(self, text: str) -> str:
+        """Normalize incoming message text while preserving a leading '!' command prefix."""
         clean = re.sub(r"^@\[[^\]]+\]\s*", "", str(text or "")).strip()
         clean = re.sub(r"^[^:\[\]\r\n]{1,40}:\s+", "", clean).strip()
-        clean_punct = clean.strip(" \t\r\n!?,.:;-")
-        lower = clean_punct.casefold()
+        # Preserve leading '!' so commands like '!marco' (or custom '!ping') match accurately
+        return clean.lstrip(" \t\r\n?,.:;-").rstrip(" \t\r\n!?,.:;-").casefold()
+
+    def _is_secret_marco(self, text: str) -> bool:
+        return self._normalize_text(text) == "!marco"
+
+    def _matches_keyword(self, text: str) -> bool:
+        lower = self._normalize_text(text)
         if not lower:
             return False
         for kw in self.keywords:
@@ -98,7 +105,8 @@ class AutoresponderModule(BaseModule):
             return
 
         text = str(msg.get("text", "")).strip()
-        if not self._matches_keyword(text):
+        is_marco = self._is_secret_marco(text)
+        if not is_marco and not self._matches_keyword(text):
             return
 
         # Check if incoming channel matches any configured channel
@@ -131,8 +139,11 @@ class AutoresponderModule(BaseModule):
             logger.info("[autoresponce] Rate-limited sender '%s'", sender)
             return
 
-        fields = extract_template_fields(msg, timezone_str=self.hub.timezone)
-        reply = format_template(self.response_template, fields)
+        if is_marco:
+            reply = "Polo"
+        else:
+            fields = extract_template_fields(msg, timezone_str=self.hub.timezone)
+            reply = format_template(self.response_template, fields)
 
         self.hub.record_user_send(sender)
         self.match_count += 1
@@ -146,7 +157,7 @@ class AutoresponderModule(BaseModule):
         }
         self.hub.record_activity(
             module="autoresponce",
-            event="auto_ack",
+            event="marco_polo" if is_marco else "auto_ack",
             sender=sender,
             channel=matched_channel_name,
             detail=f"{text} -> {reply}",

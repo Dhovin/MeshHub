@@ -81,6 +81,67 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
             self.assertEqual(len(sent), 3)
 
+    async def test_autoresponder_secret_marco_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            hub = BotHub(data_dir=tmpdir)
+            sent = []
+
+            async def capture_send(target_type, target, text):
+                sent.append((target_type, target, text))
+                return {"ok": True}
+
+            hub.tx_queue._send_fn = capture_send
+            hub.tx_queue.min_interval_seconds = 0.001
+            ar = hub.modules["autoresponce"]
+            ar.apply_config(
+                {
+                    "enabled": True,
+                    "channels": ["#test"],
+                    "keywords": ["test", "ping"],
+                    "exactMatch": True,
+                    "maxHops": 4,
+                    "responseTemplate": "@[{sender}] ACK ({hops_label})",
+                }
+            )
+
+            # Exact secret !marco triggers on #test within maxHops (distinct senders)
+            await ar.on_message(
+                {"sender": "Alice", "text": "!marco", "channel": "#test", "hops": 1}
+            )
+            await ar.on_message(
+                {"sender": "Bob", "text": "!MARCO!", "channel": "#test", "hops": 0}
+            )
+            await ar.on_message(
+                {"sender": "Charlie", "text": "@[MeshHub] !marco", "channel": "#test", "hops": 2}
+            )
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(sent), 3)
+            self.assertEqual([item[2] for item in sent], ["Polo", "Polo", "Polo"])
+            self.assertEqual(hub._activity[0]["event"], "marco_polo")
+
+            # Missing leading '!' -> ignored
+            await ar.on_message(
+                {"sender": "Dave", "text": "marco", "channel": "#test", "hops": 1}
+            )
+            # Extra words around !marco -> ignored
+            await ar.on_message(
+                {"sender": "Eve", "text": "hey !marco there", "channel": "#test", "hops": 1}
+            )
+            # Unmonitored channel -> ignored
+            await ar.on_message(
+                {"sender": "Frank", "text": "!marco", "channel": "#general", "hops": 1}
+            )
+            # Exceeding maxHops -> ignored
+            await ar.on_message(
+                {"sender": "Grace", "text": "!marco", "channel": "#test", "hops": 5}
+            )
+            # Per-user rate limit suppresses immediate second !marco from Alice
+            await ar.on_message(
+                {"sender": "Alice", "text": "!marco", "channel": "#test", "hops": 1}
+            )
+            await asyncio.sleep(0.05)
+            self.assertEqual(len(sent), 3)
+
     async def test_weather_bot_bare_zipcode_in_channel_and_default_location(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             hub = BotHub(data_dir=tmpdir)
