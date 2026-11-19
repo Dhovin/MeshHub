@@ -229,20 +229,35 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                     await ar.on_message(msg)
                 self.assertEqual(len(sent), 0)
 
-                # 2. Single user completes full 3-step sequence back-to-back within seconds
+                # 2. Single user completes full 3-step sequence with 5s per-user SpongeBob cooldown
                 await ar.on_message(
                     {"sender": "SingleUser", "text": "Are ya ready, kids?", "channel": "#test", "hops": 1}
                 )
+                # Within < 5s cooldown (t=102): rate-limited without breaking sequence state
                 clock["now"] = 102.0
                 await ar.on_message(
                     {"sender": "SingleUser", "text": "I can't hear you!", "channel": "#test", "hops": 1}
                 )
+                self.assertEqual(len(sent), 1)
+                # At t=105 (5s elapsed): Step 1 succeeds
                 clock["now"] = 105.0
+                await ar.on_message(
+                    {"sender": "SingleUser", "text": "I can't hear you!", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 2)
+                # Within < 5s of Step 1 (t=108): rate-limited without breaking state
+                clock["now"] = 108.0
+                await ar.on_message(
+                    {"sender": "SingleUser", "text": "Who lives in a pineapple under the sea?", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 2)
+                # At t=110 (5s elapsed after Step 1): Step 2 succeeds
+                clock["now"] = 110.0
                 await ar.on_message(
                     {"sender": "SingleUser", "text": "Who lives in a pineapple under the sea?", "channel": "#test", "hops": 1}
                 )
                 # Repeating Step 2 after sequence completes is ignored
-                clock["now"] = 106.0
+                clock["now"] = 116.0
                 await ar.on_message(
                     {"sender": "SingleUser2", "text": "!pineapple", "channel": "#test", "hops": 1}
                 )
@@ -329,6 +344,26 @@ class TestModules(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(len(sent), 12)
                 self.assertNotIn("#test", ar._spongebob_state)
+
+                # 5. SpongeBob 5s limiter is independent from main 30s hub.user_limiter
+                clock["now"] = 2000.0
+                await ar.on_message(
+                    {"sender": "SharedUser", "text": "test", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 13)
+                self.assertEqual(sent[12][2], "@[SharedUser] ACK (1 hop)")
+
+                # 1 second later, same user is blocked on main keyword but can trigger !ready
+                clock["now"] = 2001.0
+                await ar.on_message(
+                    {"sender": "SharedUser", "text": "test", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 13)
+                await ar.on_message(
+                    {"sender": "SharedUser", "text": "!ready", "channel": "#test", "hops": 1}
+                )
+                self.assertEqual(len(sent), 14)
+                self.assertEqual(sent[13][2], "Aye, aye, Captain!")
 
     async def test_weather_bot_bare_zipcode_in_channel_and_default_location(self):
         with tempfile.TemporaryDirectory() as tmpdir:

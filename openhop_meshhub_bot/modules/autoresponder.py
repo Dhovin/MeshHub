@@ -7,6 +7,7 @@ import re
 import time
 from typing import Any
 
+from ..core.rate_limiter import PerUserRateLimiter
 from ..mesh.text import extract_template_fields, format_template
 from ..mesh.txqueue import PRIORITY_REPLY
 from .base import BaseModule
@@ -14,6 +15,7 @@ from .base import BaseModule
 logger = logging.getLogger("openhop.meshhub-bot.autoresponder")
 
 SPONGEBOB_TIMEOUT_SECONDS = 120.0
+SPONGEBOB_RATE_LIMIT_SECONDS = 5.0
 
 SECRET_COMMANDS: dict[str, tuple[str, str]] = {
     "!marco": ("Polo", "marco_polo"),
@@ -48,6 +50,7 @@ class AutoresponderModule(BaseModule):
         self.match_count: int = 0
         self.last_match: dict[str, Any] | None = None
         self._spongebob_state: dict[str, tuple[int, float]] = {}
+        self._spongebob_limiter = PerUserRateLimiter(SPONGEBOB_RATE_LIMIT_SECONDS)
         super().__init__("autoresponce", hub, config)
 
     def apply_config(self, config: dict[str, Any]) -> None:
@@ -190,9 +193,11 @@ class AutoresponderModule(BaseModule):
             )
             return
 
-        # Enforce per-user rate limiting except for in-progress SpongeBob follow-up steps
-        is_sb_followup = sb_match is not None and sb_match[0] > 0
-        if not is_sb_followup and not self.hub.can_send_user(sender):
+        if sb_match is not None:
+            if not self._spongebob_limiter.can_send(sender):
+                logger.info("[autoresponce] SpongeBob rate-limited sender '%s'", sender)
+                return
+        elif not self.hub.can_send_user(sender):
             logger.info("[autoresponce] Rate-limited sender '%s'", sender)
             return
 
@@ -213,7 +218,10 @@ class AutoresponderModule(BaseModule):
             reply = format_template(self.response_template, fields)
             activity_event = "auto_ack"
 
-        self.hub.record_user_send(sender)
+        if sb_match is not None:
+            self._spongebob_limiter.record_send(sender)
+        else:
+            self.hub.record_user_send(sender)
         self.match_count += 1
         self.last_match = {
             "sender": sender,
