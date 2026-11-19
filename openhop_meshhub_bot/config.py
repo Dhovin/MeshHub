@@ -57,7 +57,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "weatherAlarm": "0 7 * * *",
             "nws_alerts": True,
             "alertPollSeconds": 300,
-            "userAgent": "openHopMeshHubBot/2.0.5 (https://github.com/Dhovin/meshhub-bot-openhop)",
+            "userAgent": "openHopMeshHubBot/2.0.6 (https://github.com/Dhovin/meshhub-bot-openhop)",
             "ignore_severities": ["Minor", "Unknown"],
             "ignore_events": [],
             "alertTemplate": "⚠️ {event} ({severity}) for {region} until {end}: {headline}",

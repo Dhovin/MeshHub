@@ -16,10 +16,19 @@ logger = logging.getLogger("openhop.meshhub-bot.autoresponder")
 
 SPONGEBOB_TIMEOUT_SECONDS = 120.0
 SPONGEBOB_RATE_LIMIT_SECONDS = 5.0
+BOT_SECRET_CHANNEL = "#bots"
 
-SECRET_COMMANDS: dict[str, tuple[str, str]] = {
-    "!marco": ("Polo", "marco_polo"),
-    "!never": ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "secret_cmd"),
+BOTS_MENU_MESSAGE = (
+    "Checkout:\n"
+    "#ack - bot autoresponders\n"
+    "#net - weekly Saturday net\n"
+    "#wx or #weather - weather\n"
+    "#bot - Lodestar bot"
+)
+
+SECRET_COMMANDS: dict[str, tuple[str, str, bool]] = {
+    "!marco": ("Polo", "marco_polo", False),
+    "!never": ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "secret_cmd", True),
 }
 
 SPONGEBOB_STEPS: tuple[tuple[frozenset[str], str], ...] = (
@@ -91,7 +100,11 @@ class AutoresponderModule(BaseModule):
     def required_channels(self) -> list[str]:
         if not self.enabled:
             return []
-        return list(self.channels)
+        channels = list(self.channels)
+        bot_norm = BOT_SECRET_CHANNEL.strip().lower().lstrip("#")
+        if not any(str(ch).strip().lower().lstrip("#") == bot_norm for ch in channels):
+            channels.append(BOT_SECRET_CHANNEL)
+        return channels
 
     def _normalize_text(self, text: str) -> str:
         """Normalize incoming message text while preserving a leading '!' command prefix."""
@@ -106,7 +119,7 @@ class AutoresponderModule(BaseModule):
             return ""
         return re.sub(r"\s+", " ", norm.replace("'", "").replace("\u2019", "").replace(",", "")).strip()
 
-    def _match_secret_command(self, text: str) -> tuple[str, str] | None:
+    def _match_secret_command(self, text: str) -> tuple[str, str, bool] | None:
         key = self._normalize_secret_key(text)
         if not key:
             return None
@@ -150,31 +163,58 @@ class AutoresponderModule(BaseModule):
             return
 
         text = str(msg.get("text", "")).strip()
+        norm = self._normalize_text(text)
         secret = self._match_secret_command(text)
         sb_match = None if secret is not None else self._match_spongebob_step(text)
-        is_keyword = False if (secret is not None or sb_match is not None) else self._matches_keyword(text)
-        if secret is None and sb_match is None and not is_keyword:
-            return
 
-        # Check if incoming channel matches any configured channel
-        matched_channel_name: str | None = None
+        on_bots_ch = self.hub.matches_channel(channel, BOT_SECRET_CHANNEL)
+        matched_ar_ch: str | None = None
         for ch_name in self.channels:
             if self.hub.matches_channel(channel, ch_name):
-                matched_channel_name = ch_name
+                matched_ar_ch = ch_name
                 break
-        if not matched_channel_name:
-            return
 
-        ch_key = matched_channel_name.casefold()
+        matched_channel_name: str | None = None
+        reply: str = ""
+        activity_event: str = "auto_ack"
+        active_sb: tuple[int, str] | None = None
+        ch_key = ""
         now = time.monotonic()
+
         if sb_match is not None:
-            step_idx = sb_match[0]
+            if not on_bots_ch:
+                return
+            matched_channel_name = BOT_SECRET_CHANNEL
+            ch_key = matched_channel_name.casefold()
+            step_idx, sb_reply = sb_match
             state = self._spongebob_state.get(ch_key)
             if state is not None and now > state[1]:
                 self._spongebob_state.pop(ch_key, None)
                 state = None
             if step_idx != 0 and (state is None or state[0] != step_idx):
                 return
+            active_sb = (step_idx, sb_reply)
+            reply = sb_reply
+            activity_event = "secret_cmd"
+        elif secret is not None and secret[2]:
+            if not on_bots_ch:
+                return
+            matched_channel_name = BOT_SECRET_CHANNEL
+            reply, activity_event, _ = secret
+        elif secret is not None and matched_ar_ch is not None:
+            matched_channel_name = matched_ar_ch
+            reply, activity_event, _ = secret
+        elif matched_ar_ch is not None and self._matches_keyword(text):
+            matched_channel_name = matched_ar_ch
+            fields = extract_template_fields(msg, timezone_str=self.hub.timezone)
+            reply = format_template(self.response_template, fields)
+            activity_event = "auto_ack"
+        elif on_bots_ch and (norm.startswith("!") or norm == "/help"):
+            matched_channel_name = BOT_SECRET_CHANNEL
+            reply = BOTS_MENU_MESSAGE
+            activity_event = "bots_menu"
+        else:
+            return
 
         # Hop distance check
         hops = msg.get("hops")
@@ -193,7 +233,7 @@ class AutoresponderModule(BaseModule):
             )
             return
 
-        if sb_match is not None:
+        if active_sb is not None:
             if not self._spongebob_limiter.can_send(sender):
                 logger.info("[autoresponce] SpongeBob rate-limited sender '%s'", sender)
                 return
@@ -201,24 +241,12 @@ class AutoresponderModule(BaseModule):
             logger.info("[autoresponce] Rate-limited sender '%s'", sender)
             return
 
-        if sb_match is not None:
-            step_idx = sb_match[0]
+        if active_sb is not None:
+            step_idx = active_sb[0]
             if step_idx + 1 < len(SPONGEBOB_STEPS):
                 self._spongebob_state[ch_key] = (step_idx + 1, now + SPONGEBOB_TIMEOUT_SECONDS)
             else:
                 self._spongebob_state.pop(ch_key, None)
-
-        if secret is not None:
-            reply, activity_event = secret
-        elif sb_match is not None:
-            reply = sb_match[1]
-            activity_event = "secret_cmd"
-        else:
-            fields = extract_template_fields(msg, timezone_str=self.hub.timezone)
-            reply = format_template(self.response_template, fields)
-            activity_event = "auto_ack"
-
-        if sb_match is not None:
             self._spongebob_limiter.record_send(sender)
         else:
             self.hub.record_user_send(sender)

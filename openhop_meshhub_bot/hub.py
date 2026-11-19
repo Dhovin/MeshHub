@@ -27,7 +27,7 @@ from .core.scheduler import Scheduler
 from .mesh.client import MeshCompanionClient
 from .mesh.text import MAX_LORA_BYTES, clamp_lora_message
 from .mesh.txqueue import PRIORITY_REPLY, OutboundTxQueue, TxJob
-from .modules.autoresponder import AutoresponderModule
+from .modules.autoresponder import BOT_SECRET_CHANNEL, AutoresponderModule
 from .modules.net_engine import NetSessionEngine
 from .modules.weather import WeatherBotModule
 from .web.runtime_writer import RuntimeWriter
@@ -510,9 +510,15 @@ class BotHub:
         text = str(msg.get("text", "")).strip()
         channel = msg.get("channel")
 
-        # Built-in !help command (DM or channel)
+        # Built-in !help command (DM or channel; #bots uses Autoresponder's custom menu)
         clean = re.sub(r"^@\[[^\]]+\]\s*", "", text).strip().lower()
-        if clean in ("!help", "/help"):
+        ar_mod = self.modules.get("autoresponce")
+        use_bots_menu = (
+            channel is not None
+            and bool(ar_mod and ar_mod.enabled)
+            and self.matches_channel(channel, BOT_SECRET_CHANNEL)
+        )
+        if clean in ("!help", "/help") and not use_bots_menu:
             if self.can_send_user(sender):
                 self.record_user_send(sender)
                 help_str = self.generate_help_message()
